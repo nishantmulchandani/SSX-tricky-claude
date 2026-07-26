@@ -14,6 +14,7 @@ export function clamp(v, a, b) { return v < a ? a : v > b ? b : v; }
 /** 1234567 -> "1,234,567". Only called when a value actually changed. */
 export function comma(n) {
   n = Math.round(n);
+  if (!Number.isFinite(n)) n = 0;
   const neg = n < 0;
   let s = String(neg ? -n : n);
   if (s.length > 3) {
@@ -37,26 +38,59 @@ export function clock(t) {
   return m + ':' + ss;
 }
 
+const NBSP = ' ';
+
+function charSpan(host, ch, cls, delay) {
+  const isSpace = ch === ' ';
+  let c = cls;
+  if (isSpace) c += ' kc--sp';
+  else if (ch >= '0' && ch <= '9') c += ' kc--n';
+  const s = el('span', c, host);
+  s.textContent = isSpace ? NBSP : ch;
+  s.style.animationDelay = delay.toFixed(3) + 's';
+  return s;
+}
+
 /**
  * Explode `text` into per-character spans so type can animate with a stagger.
  * Built once per trick event, never per frame.
  */
 export function kineticText(host, text, { stagger = 0.028, delay = 0, cls = 'kc' } = {}) {
   host.textContent = '';
-  const chars = String(text).split('');
-  let visible = 0;
-  for (let i = 0; i < chars.length; i++) {
-    const ch = chars[i];
-    if (ch === ' ') {
-      const sp = el('span', cls + ' kc--sp', host);
-      sp.textContent = ' ';
-      continue;
-    }
-    const s = el('span', cls, host, ch);
-    s.style.animationDelay = (delay + visible * stagger).toFixed(3) + 's';
-    visible++;
-  }
+  const str = String(text ?? '');
+  const spans = [];
+  for (let i = 0; i < str.length; i++) spans.push(charSpan(host, str[i], cls, delay + i * stagger));
+  host.__spans = spans;
+  host.__txt = str;
   return host;
+}
+
+/**
+ * Incremental version of `kineticText`: keeps the characters that did not
+ * change and only animates the tail in. That is what makes a live trick name
+ * read as *streaming* — "Frontside 360" becoming "Frontside 540" re-animates
+ * three characters, not the whole line.
+ * Returns true if the DOM was touched.
+ */
+export function streamText(host, text, { stagger = 0.03, cls = 'kc' } = {}) {
+  const str = String(text ?? '');
+  const prev = host.__txt ?? '';
+  if (prev === str) return false;
+  const spans = host.__spans || (host.__spans = []);
+
+  let common = 0;
+  const n = Math.min(prev.length, str.length);
+  while (common < n && prev[common] === str[common]) common++;
+
+  while (spans.length > common) {
+    const s = spans.pop();
+    if (s.parentNode === host) host.removeChild(s);
+  }
+  for (let i = common; i < str.length; i++) {
+    spans.push(charSpan(host, str[i], cls, (i - common) * stagger));
+  }
+  host.__txt = str;
+  return true;
 }
 
 /** Force a restart of any CSS animations declared on `node`. */
@@ -66,4 +100,11 @@ export function replay(node) {
   // events (trick landed, combo bumped), never inside the per-frame update.
   void node.offsetWidth;
   node.style.animation = '';
+}
+
+/** Re-trigger a one-shot state class (removes, flushes, re-adds). */
+export function pulse(node, cls) {
+  node.classList.remove(cls);
+  void node.offsetWidth;
+  node.classList.add(cls);
 }
