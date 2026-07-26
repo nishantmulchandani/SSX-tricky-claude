@@ -79,11 +79,17 @@ export const FEEL = {
   SLOPPY_ERR: 62,
   INVERT_PITCH: 72,
   INVERT_ROLL: 78,
+  TUCK_FLICK_GRACE: 0.18,      // pitch held under this long still reads as a flick
+  TUCK_HOLD_TIME: 0.42,        // held this long, pitch is a tuck and imparts no flip
   GRAB_CRASH_HOLD: 0.35,       // grab still held this long at touchdown = bail
   WOBBLE_TIME: 0.75,
 };
 
 const bias = (v, k) => v * k;
+const smoothstep01 = (a, b, x) => {
+  const t = Math.max(0, Math.min(1, (x - a) / (b - a)));
+  return t * t * (3 - 2 * t);
+};
 
 export class TrickSystem {
   constructor() {
@@ -112,6 +118,8 @@ export class TrickSystem {
     this.rotation = { yaw: 0, pitch: 0, roll: 0, spinRate: 0, flipRate: 0, rollRate: 0, axis: AXIS.AIR };
     this.rev = { yaw: 0, flip: 0, roll: 0 };
     this.grab = null;                 // { name, diff, dir, hold, hand, tweak }
+    this._pitchHold = 0;              // seconds the pitch axis has been parked
+    this._lastPitch = 0;
     this.grabs = [];
     this.uber = null;                 // { name, id, u, pose, vfx, duration }
     this.tricky = false;              // meter full — "It's Tricky!"
@@ -154,6 +162,16 @@ export class TrickSystem {
 
     let steer = input.axis.steer;
     let pitch = input.axis.pitch;
+
+    // The pitch axis does double duty: held, it is a tuck (speed); flicked at
+    // the lip, it is flip intent. Without telling them apart, a player holding
+    // tuck down a fast section involuntarily backflips off every jump and
+    // crashes on landing. Track how long pitch has been parked at one value so
+    // takeoff can ignore a sustained tuck and honour only a deliberate flick.
+    if (Math.abs(pitch - this._lastPitch) > 0.30) this._pitchHold = 0;
+    else if (Math.abs(pitch) > 0.5) this._pitchHold += dt;
+    else this._pitchHold = 0;
+    this._lastPitch = pitch;
 
     // ---- crash --------------------------------------------------------------
     if (body.crashed) {
@@ -307,7 +325,11 @@ export class TrickSystem {
       stick * FEEL.SPIN_FROM_STICK + pre * FEEL.SPIN_FROM_PREWIND,
       -FEEL.SPIN_MAX, FEEL.SPIN_MAX);
 
-    const pStick = -input.axis.pitch;
+    // Fade out the stick's flip contribution once pitch has been held long
+    // enough to read as a tuck rather than a flick. Prewind is unaffected —
+    // that is an explicit, deliberate wind-up.
+    const flick = 1 - smoothstep01(FEEL.TUCK_FLICK_GRACE, FEEL.TUCK_HOLD_TIME, this._pitchHold);
+    const pStick = -input.axis.pitch * flick;
     const pPre = -this._prewindPitch * this.prewind;
     this.rotation.flipRate = clamp(
       pStick * FEEL.FLIP_FROM_STICK + pPre * FEEL.FLIP_FROM_PREWIND,
