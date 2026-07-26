@@ -3,6 +3,7 @@ import { heightAt, normalInto } from '../world/terrain.js';
 
 const GRAVITY = 22.0;          // exaggerated — SSX gravity, not Earth gravity
 const RIDE_HEIGHT = 0.09;
+const SOFT_MAX_SPEED = 66;     // m/s (~240 km/h) — governed arcade top speed
 const UP = new THREE.Vector3(0, 1, 0);
 
 /**
@@ -75,16 +76,20 @@ export class BoardPhysics {
       this.groundTime += dt;
       this.up.lerp(n, 1 - Math.exp(-18 * dt)).normalize();
 
-      if (!wasGrounded) this.lastLandImpact = Math.max(0, -this.vel.y);
-
-      // Snap to the surface and remove the into-surface velocity component.
       this.pos.y = ground + RIDE_HEIGHT;
+
       const into = this.vel.dot(n);
-      if (into < 0) {
-        // Landing absorption: soft snow eats vertical impact, hard landings scrub speed.
-        const absorb = THREE.MathUtils.clamp(1 - (-into) / 34, 0.25, 1);
+      if (!wasGrounded) {
+        // Touchdown: absorb the impact once. Doing this every frame instead
+        // would scrub a few percent of speed per step and the rider would
+        // grind to a halt on an open slope.
+        this.lastLandImpact = Math.max(0, -into);
+        const scrub = THREE.MathUtils.clamp(1 - this.lastLandImpact / 46, 0.6, 1);
         this.vel.addScaledVector(n, -into);
-        this.vel.multiplyScalar(THREE.MathUtils.lerp(0.82, 1.0, absorb));
+        this.vel.multiplyScalar(scrub);
+      } else if (into < 0) {
+        // Stay glued to the surface: remove only the into-surface component.
+        this.vel.addScaledVector(n, -into);
       }
 
       // ---- steering / carving ----------------------------------------------
@@ -98,10 +103,14 @@ export class BoardPhysics {
       this.roll += (targetRoll - this.roll) * (1 - Math.exp(-9 * dt));
       this.edge = THREE.MathUtils.clamp(this.roll / 0.72, -1, 1);
 
-      // Board basis projected onto the surface.
+      // Board basis, built from the TRUE surface normal rather than the lagged
+      // visual `up`. Velocity has just been projected into the n-plane, so
+      // (forward, right) spans it exactly and the decomposition below is
+      // lossless. Using the smoothed `up` here would silently discard the
+      // out-of-plane remainder every frame — another way to bleed all speed.
       this.forward.set(Math.sin(this.yaw), 0, -Math.cos(this.yaw));
-      this.forward.addScaledVector(this.up, -this.forward.dot(this.up)).normalize();
-      const right = this._tmp.crossVectors(this.forward, this.up).normalize();
+      this.forward.addScaledVector(n, -this.forward.dot(n)).normalize();
+      const right = this._tmp.crossVectors(this.forward, n).normalize();
 
       // Decompose velocity into along-board and across-board.
       const vAlong = this.vel.dot(this.forward);
@@ -127,9 +136,11 @@ export class BoardPhysics {
       newAlong += tuck * 9.0 * dt;
       newAlong -= brake * 16.0 * dt * THREE.MathUtils.clamp(this.speed / 12, 0, 1);
 
-      // Snow drag — quadratic, plus a base friction that tuck reduces.
-      const drag = (0.0055 + 0.010 * (1 - tuck) + 0.020 * Math.abs(this.edge)) * newAlong * Math.abs(newAlong);
-      newAlong -= drag * dt;
+      // Snow drag: quadratic air/snow resistance plus a small constant friction.
+      // Tuned so a tucked rider on the ~15deg mid-course reaches ~50 m/s and a
+      // hard carve costs real speed.
+      const cd = 0.0016 + 0.0042 * (1 - tuck) + 0.0115 * Math.abs(this.edge);
+      newAlong -= (cd * newAlong * Math.abs(newAlong) + 1.1) * dt;
       newAlong = Math.max(newAlong, 0);
 
       this.vel.copy(this.forward).multiplyScalar(newAlong)
@@ -167,14 +178,32 @@ export class BoardPhysics {
 
     this.pos.addScaledVector(this.vel, dt);
 
-    // Never fall through the world.
-    const g2 = heightAt(this.pos.x, this.pos.z);
-    if (this.pos.y < g2 + RIDE_HEIGHT) {
-      this.pos.y = g2 + RIDE_HEIGHT;
-      if (this.vel.y < 0) this.vel.y = 0;
+    if (this.grounded) {
+      // The ground constraint is POSITIONAL only. Clamping vel.y here would
+      // delete the downhill component of an otherwise perfectly tangential
+      // velocity on every step, which reads as invisible, crushing brakes.
+      this.pos.y = heightAt(this.pos.x, this.pos.z) + RIDE_HEIGHT;
+    } else {
+      // Airborne safety net: never let the rider tunnel through the surface.
+      const g2 = heightAt(this.pos.x, this.pos.z);
+      if (this.pos.y < g2 + RIDE_HEIGHT) {
+        this.pos.y = g2 + RIDE_HEIGHT;
+        if (this.vel.y < 0) this.vel.y = 0;
+      }
     }
 
     this.speed = this.vel.length();
+
+    // Governed top speed. The big drops in the lower course would otherwise
+    // let the rider accelerate past 90 m/s, which outruns the camera, pins the
+    // speed FOV and makes the run unsteerable. Excess above the soft cap decays
+    // with a ~0.4s time constant rather than clamping hard, so it never reads
+    // as hitting an invisible wall.
+    if (this.speed > SOFT_MAX_SPEED) {
+      const target = SOFT_MAX_SPEED + (this.speed - SOFT_MAX_SPEED) * Math.exp(-2.5 * dt);
+      this.vel.multiplyScalar(target / this.speed);
+      this.speed = target;
+    }
   }
 
   crash(duration = 1.6) {

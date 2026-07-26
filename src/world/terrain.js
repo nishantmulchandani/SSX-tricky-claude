@@ -48,6 +48,130 @@ export function progressAt(z) {
   return THREE.MathUtils.clamp(-z / COURSE_LENGTH, 0, 1);
 }
 
+// --- authored course features ---------------------------------------------
+/**
+ * Discrete, hand-placed features layered on top of the smooth run. Each has
+ * compact support so it only perturbs its own patch of mountain, and each is
+ * expressed as a displacement in metres above the base course surface.
+ *
+ * `z` is the downhill centre of the feature (negative). The rider approaches
+ * from larger z and travels towards smaller z, so a kicker ramps up over
+ * [z, z+len] and ends in a vertical lip at z.
+ *
+ *   kicker  — takeoff ramp ending in a lip. `h` = lip height, `len` = ramp run.
+ *   table   — kicker + flat deck + landing ramp. `gap` = deck length.
+ *   quarter — concave wall on one side of the run for vertical hits.
+ *   roller  — rideable bump you can pump or pop off.
+ *   drop    — a step down; the run simply falls away.
+ *   hip     — an angled takeoff that throws you across the fall line.
+ */
+const FEATURES = [
+  { type: 'roller',  z: -260,  h: 3.5,  len: 46, off: 0,   w: 40 },
+  { type: 'kicker',  z: -520,  h: 7.0,  len: 30, off: 0,   w: 26 },
+  { type: 'roller',  z: -760,  h: 4.2,  len: 52, off: -14, w: 34 },
+  { type: 'table',   z: -1040, h: 8.5,  len: 34, off: 6,   w: 30, gap: 40 },
+  { type: 'quarter', z: -1350, h: 20,   len: 90, off: 34,  w: 40, side: 1 },
+  { type: 'kicker',  z: -1620, h: 9.5,  len: 32, off: -10, w: 28 },
+  { type: 'drop',    z: -1880, h: 14,   len: 26, off: 0,   w: 70 },
+  { type: 'roller',  z: -2080, h: 5.0,  len: 44, off: 12,  w: 36 },
+  { type: 'hip',     z: -2340, h: 11,   len: 36, off: -18, w: 30, side: -1 },
+  { type: 'table',   z: -2660, h: 12,   len: 40, off: 0,   w: 34, gap: 62 },
+  { type: 'quarter', z: -2980, h: 26,   len: 100, off: -40, w: 44, side: -1 },
+  { type: 'kicker',  z: -3260, h: 13,   len: 38, off: 8,   w: 30 },
+  { type: 'drop',    z: -3520, h: 22,   len: 30, off: 0,   w: 80 },
+  { type: 'roller',  z: -3760, h: 5.5,  len: 48, off: -16, w: 38 },
+  { type: 'table',   z: -4020, h: 14,   len: 42, off: 0,   w: 36, gap: 78 },
+  { type: 'hip',     z: -4340, h: 12,   len: 38, off: 22,  w: 32, side: 1 },
+  { type: 'quarter', z: -4640, h: 24,   len: 96, off: 38,  w: 42, side: 1 },
+  { type: 'kicker',  z: -4920, h: 15,   len: 40, off: -12, w: 32 },
+  { type: 'roller',  z: -5180, h: 4.5,  len: 46, off: 0,   w: 40 },
+  { type: 'table',   z: -5420, h: 16,   len: 44, off: 6,   w: 38, gap: 88 },
+  { type: 'kicker',  z: -5760, h: 11,   len: 36, off: -8,  w: 30 },
+  { type: 'roller',  z: -6020, h: 3.0,  len: 50, off: 0,   w: 44 },
+];
+
+/** Smooth 0..1 lateral falloff so features blend into the piste at their edges. */
+function lateralFalloff(dx, w) {
+  const t = 1 - THREE.MathUtils.clamp(Math.abs(dx) / w, 0, 1);
+  return t * t * (3 - 2 * t);
+}
+
+/** Total displacement from authored features at (x, z). */
+function featureHeight(x, z, cx) {
+  let d = 0;
+  for (let i = 0; i < FEATURES.length; i++) {
+    const f = FEATURES[i];
+    const s = z - f.z;                    // >0 = uphill of the feature
+    const span = f.len + (f.gap || 0) + 60;
+    if (s < -span || s > span) continue;  // compact support
+
+    const dx = x - (cx + f.off);
+    const lat = lateralFalloff(dx, f.w);
+    if (lat <= 0) continue;
+
+    switch (f.type) {
+      case 'roller': {
+        // Symmetric cosine bump — pump it or pop off the crest.
+        if (Math.abs(s) > f.len) break;
+        d += f.h * lat * 0.5 * (1 + Math.cos((s / f.len) * Math.PI));
+        break;
+      }
+      case 'kicker': {
+        // Ramps up over [0, len] approaching the lip at s = 0, then falls away.
+        if (s < 0 || s > f.len) break;
+        const t = 1 - s / f.len;          // 0 at the base, 1 at the lip
+        d += f.h * lat * Math.pow(t, 1.7) * (1 + 0.25 * t); // late kick for pop
+        break;
+      }
+      case 'hip': {
+        // Like a kicker but the deck tilts, throwing the rider sideways.
+        if (s < 0 || s > f.len) break;
+        const t = 1 - s / f.len;
+        const tilt = 1 + (f.side * dx / f.w) * 0.55;
+        d += f.h * lat * Math.pow(t, 1.6) * tilt;
+        break;
+      }
+      case 'table': {
+        // takeoff ramp | flat deck | landing ramp
+        const deck = f.gap;
+        if (s >= 0 && s <= f.len) {
+          const t = 1 - s / f.len;
+          d += f.h * lat * Math.pow(t, 1.7);
+        } else if (s < 0 && s >= -deck) {
+          d += f.h * lat;                                    // deck
+        } else if (s < -deck && s >= -deck - f.len * 1.6) {
+          const t = (-s - deck) / (f.len * 1.6);             // landing ramp down
+          d += f.h * lat * (1 - t) * (1 - t);
+        }
+        break;
+      }
+      case 'drop': {
+        // A step: ground falls away below s = 0 and recovers over the runout.
+        if (s > 0) break;
+        const t = THREE.MathUtils.clamp(-s / (f.len * 3), 0, 1);
+        d -= f.h * lat * (1 - t) * (1 - t);
+        break;
+      }
+      case 'quarter': {
+        // Concave wall rising off one edge of the run — vertical hits.
+        if (Math.abs(s) > f.len) break;
+        const along = 0.5 * (1 + Math.cos((s / f.len) * Math.PI));
+        const u = THREE.MathUtils.clamp((dx * f.side) / f.w, 0, 1);
+        d += f.h * along * u * u * (3 - 2 * u);
+        break;
+      }
+    }
+  }
+  return d;
+}
+
+/** Public: is this point on an authored feature? Used by props and VFX. */
+export function featureAt(x, z) {
+  return featureHeight(x, z, courseXAt(z));
+}
+
+export function courseFeatures() { return FEATURES; }
+
 // --- height field ---------------------------------------------------------
 
 /** Base downhill fall-line: steep at the top, a flat-ish outrun at the bottom. */
@@ -125,7 +249,9 @@ export function heightAt(x, z) {
   const cx = courseXAt(z);
   const dist = Math.abs(x - cx);
 
-  return courseSurface(x, z, p, cx, halfWidth) + relief(x, z, dist, halfWidth);
+  return courseSurface(x, z, p, cx, halfWidth)
+    + relief(x, z, dist, halfWidth)
+    + featureHeight(x, z, cx);
 }
 
 const _n = new THREE.Vector3();
