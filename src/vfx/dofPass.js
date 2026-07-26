@@ -10,7 +10,10 @@ import { SceneDepth } from './sceneDepth.js';
  * so the focal plane never snaps.
  */
 export class DofPass extends Pass {
-  constructor(width, height, { maxCoC = 2.6, strength = 0.85 } = {}) {
+  constructor(width, height, {
+    maxCoC = 2.6, strength = 0.85,
+    farRange = 520, farScale = 1.0, nearScale = 0.42,
+  } = {}) {
     super();
     this.needsSwap = true;
     this.focus = 10;
@@ -33,8 +36,18 @@ export class DofPass extends Pass {
     this.comp = mk(DofCompositeShader);
     this.comp.uniforms.tDepth = SceneDepth.texture;
     this.comp.uniforms.uDepthParams = SceneDepth.params;
-    this.comp.uniforms.uMaxCoC.value = maxCoC;
     this.comp.uniforms.uStrength.value = strength;
+    // NOTE: the composite shader derives circle-of-confusion from the
+    // focus/near/far range uniforms below — it has no uMaxCoC of its own.
+    // Only the half-res gather pass clamps against a maximum radius.
+
+    // Keep the CoC model identical between the two passes, or the composite
+    // will blend blur it did not actually gather.
+    for (const m of [this.gather, this.comp]) {
+      m.uniforms.uFarRange.value = farRange;
+      m.uniforms.uFarScale.value = farScale;
+      m.uniforms.uNearScale.value = nearScale;
+    }
 
     this._quad = new FullScreenQuad(this.gather);
     this.rt = null;

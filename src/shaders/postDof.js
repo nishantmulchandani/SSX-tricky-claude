@@ -2,10 +2,21 @@ import { FS_VERT, DEPTH_UTILS } from './postCommon.js';
 
 /**
  * OWNER: agent "vfx".
- * Thin-lens depth of field. Half-res golden-angle disc gather, composited by
- * circle-of-confusion. Deliberately restrained: the rider stays sharp, the
- * far mountains get just enough softness to give the frame depth.
+ * Depth of field. Half-res golden-angle disc gather, composited by circle of
+ * confusion. Deliberately restrained: the rider and the whole rideable
+ * mid-ground stay sharp, only the far peaks and the very near foreground get
+ * softened — enough to separate the planes, never enough to read as "blurry".
+ *
+ * The CoC is authored with explicit metre ranges rather than a true thin lens,
+ * because a real lens focused at 10 m would blur a 2 km mountain into paste.
  */
+const COC_GLSL = /* glsl */`
+  // Signed CoC in [-1, 1]. Negative = nearer than the focal plane.
+  float cocNorm(float dist) {
+    float far01  = smoothstep(uFocus * 2.2, uFocus * 2.2 + uFarRange, dist);
+    float near01 = 1.0 - smoothstep(uFocus * 0.18, uFocus * 0.82, dist);
+    return far01 * far01 * uFarScale - near01 * uNearScale;
+  }`;
 
 export const DofGatherShader = {
   uniforms: {
@@ -14,8 +25,10 @@ export const DofGatherShader = {
     uDepthParams: { value: null },
     uTexel: { value: null },
     uFocus: { value: 10.0 },
-    uMaxCoC: { value: 2.4 },     // pixels, at half resolution
-    uNearScale: { value: 0.55 },
+    uFarRange: { value: 520.0 },
+    uFarScale: { value: 1.0 },
+    uNearScale: { value: 0.42 },
+    uMaxCoC: { value: 3.0 },     // half-res pixels
   },
   vertexShader: FS_VERT,
   fragmentShader: /* glsl */`
@@ -23,25 +36,18 @@ export const DofGatherShader = {
     uniform sampler2D tDiffuse, tDepth;
     uniform vec4 uDepthParams;
     uniform vec2 uTexel;
-    uniform float uFocus, uMaxCoC, uNearScale;
+    uniform float uFocus, uFarRange, uFarScale, uNearScale, uMaxCoC;
     varying vec2 vUv;
     ${DEPTH_UTILS}
+    ${COC_GLSL}
 
-    // Signed CoC in half-res pixels. Negative = in front of the focal plane.
-    float cocAt(vec2 uv) {
-      float dist = viewDepthAt(tDepth, uv, uDepthParams.x, uDepthParams.y);
-      float c = 1.0 - uFocus / max(dist, 0.05);
-      // Soften the far ramp so distant terrain does not turn to mush.
-      c = sign(c) * pow(abs(c), 1.35);
-      return clamp(c, -uNearScale, 1.0) * uMaxCoC;
-    }
-
-    #define TAPS 16
+    #define TAPS 12
     const float GOLDEN = 2.39996323;
 
     void main() {
-      float coc = cocAt(vUv);
-      float r = abs(coc);
+      float dist = viewDepthAt(tDepth, vUv, uDepthParams.x, uDepthParams.y);
+      float r = abs(cocNorm(dist)) * uMaxCoC;
+
       vec3 sum = texture2D(tDiffuse, vUv).rgb;
       float total = 1.0;
 
@@ -49,18 +55,16 @@ export const DofGatherShader = {
         float fi = float(i) + 1.0;
         float a = fi * GOLDEN;
         float rad = sqrt(fi / float(TAPS));
-        vec2 offs = vec2(cos(a), sin(a)) * rad * r * uTexel;
-        vec2 uv = vUv + offs;
+        vec2 uv = vUv + vec2(cos(a), sin(a)) * rad * r * uTexel;
         vec3 c = texture2D(tDiffuse, uv).rgb;
-        float tapCoC = cocAt(uv);
-        // A sharp foreground must not be smeared by a blurry background tap.
-        float w = clamp((abs(tapCoC) - rad * r) * 2.0 + 1.0, 0.0, 1.0);
-        // Bokeh weighting: bright samples spread more, like real defocus.
-        w *= 1.0 / (1.0 + max(0.0, max(c.r, max(c.g, c.b)) - 1.0) * 0.35);
+        float tapDist = viewDepthAt(tDepth, uv, uDepthParams.x, uDepthParams.y);
+        float tapR = abs(cocNorm(tapDist)) * uMaxCoC;
+        // A sharp neighbour must not be smeared in by a blurry centre pixel.
+        float w = clamp((tapR - rad * r) * 1.5 + 1.0, 0.0, 1.0);
         sum += c * w;
         total += w;
       }
-      gl_FragColor = vec4(sum / total, clamp(r / max(uMaxCoC, 1e-3), 0.0, 1.0));
+      gl_FragColor = vec4(sum / total, 1.0);
     }`,
 };
 
@@ -71,8 +75,9 @@ export const DofCompositeShader = {
     tDepth: { value: null },
     uDepthParams: { value: null },
     uFocus: { value: 10.0 },
-    uMaxCoC: { value: 2.4 },
-    uNearScale: { value: 0.55 },
+    uFarRange: { value: 520.0 },
+    uFarScale: { value: 1.0 },
+    uNearScale: { value: 0.42 },
     uStrength: { value: 1.0 },
   },
   vertexShader: FS_VERT,
@@ -80,17 +85,15 @@ export const DofCompositeShader = {
     #include <packing>
     uniform sampler2D tDiffuse, tBlur, tDepth;
     uniform vec4 uDepthParams;
-    uniform float uFocus, uMaxCoC, uNearScale, uStrength;
+    uniform float uFocus, uFarRange, uFarScale, uNearScale, uStrength;
     varying vec2 vUv;
     ${DEPTH_UTILS}
+    ${COC_GLSL}
     void main() {
       vec4 sharp = texture2D(tDiffuse, vUv);
       float dist = viewDepthAt(tDepth, vUv, uDepthParams.x, uDepthParams.y);
-      float c = 1.0 - uFocus / max(dist, 0.05);
-      c = sign(c) * pow(abs(c), 1.35);
-      float coc = clamp(abs(clamp(c, -uNearScale, 1.0)), 0.0, 1.0);
-      float mixAmt = smoothstep(0.05, 0.85, coc) * uStrength;
-      vec3 blurred = texture2D(tBlur, vUv).rgb;
-      gl_FragColor = vec4(mix(sharp.rgb, blurred, mixAmt), sharp.a);
+      float coc = abs(cocNorm(dist));
+      float mixAmt = smoothstep(0.04, 0.75, coc) * uStrength;
+      gl_FragColor = vec4(mix(sharp.rgb, texture2D(tBlur, vUv).rgb, mixAmt), sharp.a);
     }`,
 };
