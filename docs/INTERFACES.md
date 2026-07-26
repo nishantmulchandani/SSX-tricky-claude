@@ -81,8 +81,20 @@ new GameAudio() -> { init(), update(dt, body, tricks) }
 
 ### `src/ui/hud.js` + `src/ui/hud.css` — owner: **ui**
 ```js
-new HUD(rootEl) -> { update(dt, body, tricks), resize(w, h) }
+new HUD(rootEl) -> { update(dt, body, tricks, run), resize(w, h) }
 ```
+`run` is the `GameState` from `src/core/gameState.js` (owner: integration):
+```js
+run.state      // 'title' | 'countdown' | 'riding' | 'finished' | 'paused'
+run.time       // elapsed run seconds
+run.countdown  // seconds left on the 3-2-1, only during 'countdown'
+run.progress   // 0..1 down the course
+run.finalTime, run.finalScore   // frozen at the finish line
+run.best       // { score, time } | null
+```
+The game loop already drives it: Escape toggles pause, and jump/tuck from the
+title or finished screen starts a new run. The HUD only needs to *render* the
+right screen for `run.state` — it must not mutate `run`.
 
 ## Tools
 ```
