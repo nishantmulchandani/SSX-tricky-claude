@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { Engine } from './core/engine.js';
 import { Input } from './core/input.js';
 import { ChaseCamera } from './core/camera.js';
+import { GameState } from './core/gameState.js';
 import { Mountain } from './world/mountain.js';
 import { createSky } from './world/sky.js';
 import { createProps } from './world/props.js';
@@ -37,6 +38,9 @@ const chase = new ChaseCamera(engine.camera);
 const audio = new GameAudio();
 const hud = new HUD(document.getElementById('ui-root'));
 const post = createPostStack(engine, { sky });
+const run = new GameState({
+  onStart: () => { body.reset(-20); tricks.reset(); chase.snap(body); },
+});
 
 body.reset(-20);
 chase.snap(body);
@@ -51,17 +55,27 @@ const game = {
   fixedUpdate(dt, elapsed) {
     input.poll(dt);
 
-    // The trick system owns rotation while airborne and reports back the
-    // control intent the physics body should apply.
-    const intent = tricks.fixedUpdate(dt, input, body);
+    if (input.justPressed('pause')) run.togglePause();
+    // Any of the ride controls drops you into the run from the title screen.
+    if (!run.simRunning && (input.justPressed('jump') || input.justPressed('tuck'))) {
+      run.beginCountdown();
+    }
 
-    body.step(dt, {
-      steer: intent.steer,
-      pitch: intent.pitch,
-      jumpHeld: input.down('jump'),
-      jumpReleased: input.justReleased('jump'),
-      brake: input.down('brake'),
-    });
+    const stepPhysics = run.fixedUpdate(dt, body, tricks);
+
+    if (stepPhysics) {
+      // The trick system owns rotation while airborne and reports back the
+      // control intent the physics body should apply.
+      const intent = tricks.fixedUpdate(dt, input, body);
+
+      body.step(dt, {
+        steer: intent.steer,
+        pitch: intent.pitch,
+        jumpHeld: input.down('jump'),
+        jumpReleased: input.justReleased('jump'),
+        brake: input.down('brake'),
+      });
+    }
 
     if (input.justPressed('reset')) { body.reset(body.pos.z); tricks.reset(); chase.snap(body); }
     input.endFrame();
@@ -75,7 +89,7 @@ const game = {
     vfx.update(dt, body, tricks, engine.camera);
     sky.update(dt, elapsed, engine.camera);
     audio.update(dt, body, tricks);
-    hud.update(dt, body, tricks);
+    hud.update(dt, body, tricks, run);
   },
 
   render(dt) {
@@ -92,4 +106,4 @@ engine.add(game);
 engine.start();
 
 // Debug handle for tools/shot.mjs and tools/probe.mjs.
-globalThis.__game = { engine, body, chase, mountain, sky, input, rider, vfx, tricks, props, hud, post, audio, THREE };
+globalThis.__game = { engine, body, chase, mountain, sky, input, rider, vfx, tricks, props, hud, post, audio, run, THREE };

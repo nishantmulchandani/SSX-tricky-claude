@@ -61,6 +61,9 @@ async function main() {
   for (const s of shots) {
     await page.evaluate((s) => {
       const g = globalThis.__game;
+      // Captures must show a live run, not the title screen.
+      g.run?.beginCountdown?.();
+      if (g.run) { g.run.state = 'riding'; g.run.countdown = 0; }
       g.body.reset(s.z);
       g.body.vel.set(0, 0, -(s.speed || 20));
       if (s.steer !== undefined) g.__steer = s.steer;

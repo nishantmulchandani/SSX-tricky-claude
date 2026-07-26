@@ -12,7 +12,12 @@ page.on('pageerror', (e) => console.log('PAGEERROR', String(e)));
 page.on('console', (m) => console.log('CONSOLE', m.type(), m.text()));
 await page.goto(process.env.URL || 'http://localhost:5173/', { waitUntil: 'networkidle' });
 await page.waitForFunction(() => !!globalThis.__game, null, { timeout: 30000 });
-await page.evaluate((z) => { globalThis.__game.body.reset(z); }, +(process.argv[2] || -800));
+await page.evaluate((z) => {
+  const g = globalThis.__game;
+  g.run?.beginCountdown?.();
+  if (g.run) { g.run.state = 'riding'; g.run.countdown = 0; }
+  g.body.reset(z);
+}, +(process.argv[2] || -800));
 await page.waitForTimeout(3000);
 
 const info = await page.evaluate(() => {
