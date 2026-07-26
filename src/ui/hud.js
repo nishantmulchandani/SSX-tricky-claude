@@ -72,6 +72,7 @@ export class HUD {
     this._banner = 0;
     this._ghost = 0;
     this._rows = 0;
+    this._clearGen = 0;
 
     this._build();
     this.resize(this.w, this.h);
@@ -186,28 +187,37 @@ export class HUD {
     el('span', 'logo__b', logo, 'BLITZ');
     el('div', 'logo__rule', ti);
     el('div', 'logo__sub', ti, 'ALPINE TRICK RUN  ·  6 400 M  ·  ONE DROP');
-    this.elCta = el('div', 'ov__cta', ti, 'PRESS ANY KEY TO DROP IN');
+    el('div', 'ov__cta', ti, 'PRESS SPACE OR W TO DROP IN');
     this._controlGrid(el('div', 'ov__cols', ti));
 
+    // Countdown -------------------------------------------------------------
+    this.elCount = el('div', 'count', hud);
+
     // Pause -----------------------------------------------------------------
-    const p = el('div', 'ov ov--pause', hud);
+    const p = el('div', 'ov ov--paused', hud);
     const pi = el('div', 'ov__inner', p);
     el('div', 'ov__title', pi, 'PAUSED');
     el('div', 'logo__rule', pi);
     this._controlGrid(el('div', 'ov__cols', pi));
-    el('div', 'ov__cta', pi, 'ESC TO RESUME  ·  R TO RESTART');
+    el('div', 'ov__cta', pi, 'ESC TO RESUME');
 
     // Results ---------------------------------------------------------------
-    const r = el('div', 'ov ov--done', hud);
+    const r = el('div', 'ov ov--finished', hud);
     const ri = el('div', 'ov__inner ov__inner--wide', r);
     el('div', 'ov__title', ri, 'RUN COMPLETE');
     el('div', 'logo__rule', ri);
+    const head = el('div', 'res__head', ri);
+    el('div', 'lbl', head, 'FINAL SCORE');
+    this.elResScore = el('div', 'res__score', head, '0');
+    this.elResBest = el('div', 'res__pb', head, '');
     const cols = el('div', 'res', ri);
-    this.elResStats = el('div', 'res__stats', cols);
-    const best = el('div', 'res__best', cols);
-    el('div', 'lbl', best, 'BEST TRICKS');
+    const st = el('div', 'res__col', cols);
+    el('div', 'lbl lbl--wide', st, 'BREAKDOWN');
+    this.elResStats = el('div', 'res__stats', st);
+    const best = el('div', 'res__col', cols);
+    el('div', 'lbl lbl--wide', best, 'BEST TRICKS');
     this.elResList = el('div', 'res__list', best);
-    el('div', 'ov__cta', ri, 'PRESS R TO RIDE IT AGAIN');
+    el('div', 'ov__cta', ri, 'PRESS SPACE TO RIDE IT AGAIN');
   }
 
   _controlGrid(host) {
@@ -623,36 +633,43 @@ export class HUD {
   }
 
   // ── results ──────────────────────────────────────────────────────────────
-  _finish(tricks) {
+  _results(tricks, run) {
     const list = Array.isArray(tricks?.tricks) ? tricks.tricks : [];
-    const total = Math.round((tricks?.score ?? 0) + (tricks?.pending ?? 0) * (tricks?.combo ?? 1));
+    const total = Math.round(run?.finalScore ?? tricks?.score ?? 0);
     const best = list.reduce((m, t) => Math.max(m, t?.points ?? 0), 0);
     const air = list.reduce((m, t) => m + (t?.airTime ?? 0), 0);
+    const t0 = run?.finalTime ?? this.time;
+
+    this.elResScore.textContent = comma(total);
+    const pb = run?.best;
+    this.elResBest.textContent = pb ? 'BEST  ' + comma(pb.score) + '  ·  ' + clock(pb.time) : '';
+    this.elResBest.classList.toggle('is-new', !!pb && Math.round(pb.score) === total);
 
     const stats = [
-      ['TIME', clock(this.time)],
+      ['TIME', clock(t0)],
       ['TRICKS LANDED', comma(list.length)],
       ['BEST SINGLE TRICK', comma(best)],
-      ['AIR TIME', air.toFixed(1) + ' s'],
+      ['TOTAL AIR TIME', air.toFixed(1) + ' s'],
       ['BIGGEST CHAIN', comma(tricks?.scorer?.best ?? 0)],
-      ['TOTAL', comma(total)],
+      ['UBERS LANDED', comma(list.filter((t) => t?.uber).length)],
     ];
     this.elResStats.textContent = '';
     for (const [k, v] of stats) {
-      const row = el('div', 'res__row' + (k === 'TOTAL' ? ' res__row--total' : ''), this.elResStats);
+      const row = el('div', 'res__row', this.elResStats);
       el('span', 'res__k', row, k);
       el('span', 'res__v', row, v);
     }
 
     const top = list.slice().sort((a, b) => (b?.points ?? 0) - (a?.points ?? 0)).slice(0, 5);
     this.elResList.textContent = '';
-    if (!top.length) el('div', 'res__trick', this.elResList, 'No tricks landed — go bigger.');
+    if (!top.length) {
+      el('div', 'res__trick res__trick--none', this.elResList, 'NO TRICKS LANDED — GO BIGGER');
+    }
     for (const t of top) {
       const row = el('div', 'res__trick', this.elResList);
       el('span', 'res__tn', row, String(t?.name || 'Trick').toUpperCase());
       el('span', 'res__tp', row, '+' + comma(t?.points ?? 0));
     }
-    this.setState('done');
   }
 }
 

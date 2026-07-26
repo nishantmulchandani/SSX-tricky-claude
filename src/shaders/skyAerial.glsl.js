@@ -98,7 +98,7 @@ vec3 skyAerialTransmittance(vec3 worldPos) {
   return exp(-skyAerialOpticalDepth(worldPos));
 }
 
-/** Fade `color` at `worldPos` into the atmosphere as seen from the camera. */
+/** Fade 'color' at 'worldPos' into the atmosphere as seen from the camera. */
 vec3 skyAerialPerspective(vec3 color, vec3 worldPos) {
   vec3 v = worldPos - uAerialCameraPos;
   float dist = length(v);

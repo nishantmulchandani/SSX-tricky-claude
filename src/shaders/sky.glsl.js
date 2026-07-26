@@ -133,6 +133,74 @@ void main() {
 `;
 
 // ---------------------------------------------------------------------------
+// Pass 4 — ambient probe. A 4x1 RGBA8 target that the CPU reads back whenever
+// the sky is rebuilt, so the analytic sky is what decides the colour of the
+// sun light, the snow bounce and the fog. Nothing about the lighting rig is
+// hand-picked; it all falls out of the same atmosphere.
+//
+//   texel 0  cosine-weighted average sky radiance over the upper hemisphere
+//            (this is exactly E_sky / PI for an up-facing surface)
+//   texel 1  sun transmittance to the camera altitude  (already 0..1)
+//   texel 2  average radiance around the horizon ring   (fog / haze colour)
+//   texel 3  zenith radiance
+//
+// Everything but texel 1 is stored as sqrt(radiance) to spend the 8 bits where
+// the eye is; radiance here is normalised to a solar irradiance of 1 and never
+// exceeds ~0.3 for a daytime sky.
+// ---------------------------------------------------------------------------
+export const AMBIENT_FRAG = /* glsl */ `
+precision highp float;
+varying vec2 vUv;
+uniform sampler2D uSkyViewLut;
+uniform vec3 uSunDir;
+uniform float uCameraAltitude;
+${ATMOSPHERE_GLSL}
+
+// The sky-view LUT is stored in a sun-relative frame, so we are free to put
+// the sun at azimuth +z here and read it with the same parameterisation.
+vec3 probeSky(vec3 rd, float r) {
+  vec3 viewFlat = normalize(vec3(rd.x, 0.0, rd.z) + vec3(1e-5, 0.0, 0.0));
+  bool hitsGround = atmRaySphere(vec3(0.0, r, 0.0), rd, ATM_GROUND_R) >= 0.0;
+  vec2 uv = atmSkyViewUv(hitsGround, rd.y, viewFlat.z, r);
+  uv = vec2(atmFromUnitToSubUv(uv.x, 256.0), atmFromUnitToSubUv(uv.y, 144.0));
+  return texture2D(uSkyViewLut, uv).rgb;
+}
+
+void main() {
+  float r = ATM_GROUND_R + max(uCameraAltitude, 0.002);
+  int slot = int(floor(vUv.x * 4.0));
+  vec3 c = vec3(0.0);
+
+  if (slot == 0) {
+    // Cosine-weighted, so the mean radiance returned is E / PI directly.
+    for (int i = 0; i < 8; i++) {
+      for (int j = 0; j < 8; j++) {
+        float a = (float(i) + 0.5) / 8.0;
+        float b = (float(j) + 0.5) / 8.0;
+        float phi = 2.0 * ATM_PI * a;
+        vec3 rd = vec3(sqrt(b) * cos(phi), sqrt(1.0 - b), sqrt(b) * sin(phi));
+        c += probeSky(rd, r);
+      }
+    }
+    c /= 64.0;
+  } else if (slot == 1) {
+    gl_FragColor = vec4(atmTransmittance(r, uSunDir.y), 1.0);
+    return;
+  } else if (slot == 2) {
+    for (int i = 0; i < 16; i++) {
+      float phi = 2.0 * ATM_PI * (float(i) + 0.5) / 16.0;
+      c += probeSky(normalize(vec3(cos(phi), 0.035, sin(phi))), r);
+    }
+    c /= 16.0;
+  } else {
+    c = probeSky(vec3(0.0, 1.0, 0.0), r);
+  }
+
+  gl_FragColor = vec4(sqrt(clamp(c, 0.0, 1.0)), 1.0);
+}
+`;
+
+// ---------------------------------------------------------------------------
 // Sky dome
 // ---------------------------------------------------------------------------
 export const SKYDOME_VERT = /* glsl */ `
@@ -301,6 +369,12 @@ void main() {
     vec3 groundHaze = horizonCol * uGroundTint;
     col = mix(col, groundHaze, below * 0.85);
   }
+
+  // A clear zenith-to-horizon ramp is the widest, smoothest gradient in the
+  // whole frame and the first place 8-bit output banding shows. Multiplicative
+  // dither costs one hash and puts the error below the quantisation step.
+  float dith = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453);
+  col *= 1.0 + (dith - 0.5) * 0.004;
 
   gl_FragColor = vec4(col * uSkyExposure, 1.0);
   #include <tonemapping_fragment>
