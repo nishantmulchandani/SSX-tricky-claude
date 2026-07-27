@@ -104,13 +104,22 @@ console.log('=== TRICK SYSTEM TEST ===\n');
   check('landing resolves (not stuck in air phase)', tricks.phase !== 'air', `phase=${tricks.phase}`);
 }
 
-// 2. Spin: hold a spin input through the air and expect a named rotation trick.
+// 2. Spin: wind up on the ground, hold the spin through the air, spot the
+//    landing. Run it over the section with real kickers — one small lip gives
+//    too little air to accumulate a countable rotation, and the wind-up needs a
+//    definite stick direction or it latches no spin direction at all.
 {
   const { tricks, log } = run({
-    startZ: -440, seconds: 10,
+    startZ: -960, seconds: 25,
     script: (t, { body, input }) => {
-      input.set('prewind', body.grounded && body.pos.z > -530);
-      input.set('spinR', !body.grounded);
+      const spotting = body.vel.y < 0 && altitude(body) < 6;
+      if (body.grounded) {
+        input.set('prewind', true);
+        input.axis.steer = 0.85;          // wind-up needs a direction
+      } else {
+        input.set('prewind', false);
+        input.set('spinR', !spotting);
+      }
     },
   });
   // rotation.yaw is cleared when the trick resolves, so assert on the peak.
@@ -142,6 +151,10 @@ console.log('=== TRICK SYSTEM TEST ===\n');
       input.set('grab2', !body.grounded && body.airTime > 0.25 && !spotting);
     },
   });
+  // Cash the chain first — the same thing the finish line does. Points sit in
+  // `pending` until a chain ends, so asserting on `score` mid-combo is testing
+  // the wrong number.
+  tricks.bankAll();
   check('score accumulates over a multi-feature run', tricks.score > 0, `score=${Math.round(tricks.score)}`);
   check('boost meter fills from landed tricks', tricks.boost > 0, `boost=${tricks.boost.toFixed(2)}`);
   check('tricks are recorded in the log', (tricks.tricks?.length ?? 0) > 0, `${tricks.tricks?.length ?? 0} entries`);

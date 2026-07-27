@@ -7,7 +7,7 @@
  *   node tools/ridetest.mjs [--steer auto|0] [--verbose]
  */
 import { BoardPhysics } from '../src/physics/board.js';
-import { heightAt, courseXAt, COURSE_LENGTH, courseFeatures } from '../src/world/terrain.js';
+import { heightAt, courseXAt, courseWidthAt, COURSE_LENGTH, courseFeatures } from '../src/world/terrain.js';
 import { FIXED_DT } from '../src/core/engine.js';
 
 const verbose = process.argv.includes('--verbose');
@@ -19,14 +19,17 @@ const samples = [];
 let airEvents = [];
 let currentAir = null;
 let maxSpeed = 0, maxSpeedAt = null, minMovingSpeed = Infinity;
-let stuckFor = 0, worstStuck = 0;
+let stuckFor = 0, worstStuck = 0, worstStuckAt = null;
 let t = 0;
 
 for (let i = 0; i < 120 * 400; i++) { // up to 400 simulated seconds
-  // Steer gently back towards the course centre, like a competent player.
+  // Steer back towards the course centre like a competent player. Correction
+  // is scaled to the track width, so a narrow section does not make this
+  // oversteer and scrub away all its speed.
   const cx = courseXAt(body.pos.z);
-  const err = body.pos.x - cx;
-  const steer = Math.max(-1, Math.min(1, err * 0.05 + body.vel.x * 0.06));
+  const half = Math.max(8, courseWidthAt(body.pos.z) * 0.5);
+  const err = (body.pos.x - cx) / half;
+  const steer = Math.max(-0.6, Math.min(0.6, err * 0.9 + body.vel.x * 0.05));
 
   body.step(FIXED_DT, {
     steer,
@@ -47,7 +50,10 @@ for (let i = 0; i < 120 * 400; i++) { // up to 400 simulated seconds
 
   if (body.speed > maxSpeed) { maxSpeed = body.speed; maxSpeedAt = { z: body.pos.z, air: !body.grounded }; }
   if (body.grounded) {
-    if (body.speed < 4) { stuckFor += FIXED_DT; worstStuck = Math.max(worstStuck, stuckFor); }
+    if (body.speed < 4) {
+      stuckFor += FIXED_DT;
+      if (stuckFor > worstStuck) { worstStuck = stuckFor; worstStuckAt = { z: body.pos.z, x: body.pos.x, cx }; }
+    }
     else { stuckFor = 0; minMovingSpeed = Math.min(minMovingSpeed, body.speed); }
   }
 
@@ -63,7 +69,8 @@ console.log(`finished:        ${finished ? 'yes' : 'NO — stalled at z=' + Math
 console.log(`run time:        ${t.toFixed(1)}s`);
 console.log(`max speed:       ${maxSpeed.toFixed(1)} m/s  (${(maxSpeed * 3.6).toFixed(0)} km/h) at z=${Math.round(maxSpeedAt.z)} ${maxSpeedAt.air ? '(airborne)' : '(on snow)'}`);
 console.log(`min moving spd:  ${minMovingSpeed === Infinity ? 'n/a' : minMovingSpeed.toFixed(1)} m/s`);
-console.log(`longest stall:   ${worstStuck.toFixed(2)}s`);
+console.log(`longest stall:   ${worstStuck.toFixed(2)}s`
+  + (worstStuckAt ? ` at z=${Math.round(worstStuckAt.z)} x=${worstStuckAt.x.toFixed(1)} (course centre ${worstStuckAt.cx.toFixed(1)}, offset ${(worstStuckAt.x - worstStuckAt.cx).toFixed(1)}m)` : ''));
 console.log(`air events:      ${airEvents.length}`);
 
 const big = airEvents.filter((a) => a.dur > 0.6).sort((a, b) => b.dur - a.dur);

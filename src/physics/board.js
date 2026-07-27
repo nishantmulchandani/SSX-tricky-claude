@@ -146,6 +146,19 @@ export class BoardPhysics {
       this.vel.copy(this.forward).multiplyScalar(newAlong)
         .addScaledVector(right, newAcross + lateralG);
 
+      // Stall recovery. Forward speed is clamped at zero so the rider can never
+      // ride backwards, but that also means anywhere the ground tilts up — the
+      // face of a kicker reached too slowly — is a permanent trap: no forward
+      // drive, no way to slide back. Below walking pace, nudge the rider along
+      // the true downhill direction regardless of which way the board points,
+      // so gravity always eventually wins. Costs nothing at riding speed.
+      if (this.speed < 4.5) {
+        const fall = this._flat.set(0, -GRAVITY, 0);
+        fall.addScaledVector(n, -fall.dot(n));          // project onto the slope
+        const g = fall.length();
+        if (g > 0.01) this.vel.addScaledVector(fall, (1 / g) * 5.5 * dt);
+      }
+
       // ---- ollie charge ------------------------------------------------------
       if (input.jumpHeld) this.crouch = Math.min(1, this.crouch + dt * 2.6);
       if (input.jumpReleased && this.crouch > 0.05) {

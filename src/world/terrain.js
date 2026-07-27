@@ -17,6 +17,11 @@ import { fbm2, ridged2, hash2 } from '../core/noise.js';
 export const COURSE_LENGTH = 6400; // metres of -Z
 export const COURSE_START_Y = 1750;
 
+// Banked wall bounding the run. Low enough to launch off, steep enough to hold
+// a line in. BERM_RUN is how far it takes to reach full height.
+const BERM_H = 11;
+const BERM_RUN = 16;
+
 // --- course centre spline -------------------------------------------------
 // A hand-tuned meander so the run reads as a designed course, not noise.
 const CTRL = [
@@ -46,8 +51,10 @@ const LUT_W = new Float64Array(LUT_N);
     const c = i / (LUT_N - 1);
     _curve.getPointAt(c, p);
     LUT_X[i] = p.x;
-    // Course pinches at the top (start gate) and flares through the mid-section.
-    LUT_W[i] = 46 + 34 * Math.sin(c * Math.PI) + 10 * Math.sin(c * 11.0);
+    // Track width. Deliberately narrow and fairly consistent: SSX courses read
+    // as a ribbon you are held inside, not an open field. It opens a little in
+    // the middle third for the big feature sections and pinches at the gates.
+    LUT_W[i] = 30 + 12 * Math.sin(c * Math.PI) + 3.5 * Math.sin(c * 7.0);
   }
 }
 
@@ -101,28 +108,41 @@ export function progressAt(z) {
  *   hip     — an angled takeoff that throws you across the fall line.
  */
 const FEATURES = [
-  { type: 'roller',  z: -260,  h: 3.5,  len: 46, off: 0,   w: 40 },
-  { type: 'kicker',  z: -520,  h: 7.0,  len: 30, off: 0,   w: 26 },
-  { type: 'roller',  z: -760,  h: 4.2,  len: 52, off: -14, w: 34 },
-  { type: 'table',   z: -1040, h: 8.5,  len: 34, off: 6,   w: 30, gap: 40 },
-  { type: 'quarter', z: -1350, h: 20,   len: 90, off: 34,  w: 40, side: 1 },
-  { type: 'kicker',  z: -1620, h: 9.5,  len: 32, off: -10, w: 28 },
-  { type: 'drop',    z: -1880, h: 14,   len: 26, off: 0,   w: 70 },
-  { type: 'roller',  z: -2080, h: 5.0,  len: 44, off: 12,  w: 36 },
-  { type: 'hip',     z: -2340, h: 11,   len: 36, off: -18, w: 30, side: -1 },
-  { type: 'table',   z: -2660, h: 12,   len: 40, off: 0,   w: 34, gap: 62 },
-  { type: 'quarter', z: -2980, h: 26,   len: 100, off: -40, w: 44, side: -1 },
-  { type: 'kicker',  z: -3260, h: 13,   len: 38, off: 8,   w: 30 },
-  { type: 'drop',    z: -3520, h: 22,   len: 30, off: 0,   w: 80 },
-  { type: 'roller',  z: -3760, h: 5.5,  len: 48, off: -16, w: 38 },
-  { type: 'table',   z: -4020, h: 14,   len: 42, off: 0,   w: 36, gap: 78 },
-  { type: 'hip',     z: -4340, h: 12,   len: 38, off: 22,  w: 32, side: 1 },
-  { type: 'quarter', z: -4640, h: 24,   len: 96, off: 38,  w: 42, side: 1 },
-  { type: 'kicker',  z: -4920, h: 15,   len: 40, off: -12, w: 32 },
-  { type: 'roller',  z: -5180, h: 4.5,  len: 46, off: 0,   w: 40 },
-  { type: 'table',   z: -5420, h: 16,   len: 44, off: 6,   w: 38, gap: 88 },
-  { type: 'kicker',  z: -5760, h: 11,   len: 36, off: -8,  w: 30 },
-  { type: 'roller',  z: -6020, h: 3.0,  len: 50, off: 0,   w: 44 },
+  // --- section 1: warm-up. Read the line, find the rhythm. ----------------
+  { type: 'roller',  z: -240,  h: 3.0,  len: 44, off: 0,   w: 26 },
+  { type: 'roller',  z: -340,  h: 3.4,  len: 40, off: 0,   w: 26 },
+  { type: 'kicker',  z: -520,  h: 6.5,  len: 30, off: 0,   w: 22 },
+  { type: 'roller',  z: -760,  h: 3.8,  len: 46, off: -5,  w: 24 },
+
+  // --- section 2: first real airs, still forgiving ------------------------
+  { type: 'table',   z: -1040, h: 8.0,  len: 32, off: 0,   w: 24, gap: 38 },
+  { type: 'quarter', z: -1330, h: 9,    len: 70, off: 13,  w: 14, side: 1 },
+  { type: 'kicker',  z: -1600, h: 9.0,  len: 32, off: -4,  w: 22 },
+  { type: 'drop',    z: -1860, h: 12,   len: 26, off: 0,   w: 34 },
+
+  // --- section 3: rhythm run. Three hits in quick succession. -------------
+  { type: 'roller',  z: -2060, h: 4.4,  len: 38, off: 4,   w: 24 },
+  { type: 'roller',  z: -2160, h: 4.8,  len: 36, off: -3,  w: 24 },
+  { type: 'hip',     z: -2340, h: 10,   len: 34, off: -7,  w: 22, side: -1 },
+  { type: 'table',   z: -2640, h: 11,   len: 38, off: 0,   w: 26, gap: 56 },
+
+  // --- section 4: the steep. Big, committing features. --------------------
+  { type: 'quarter', z: -2960, h: 12,   len: 78, off: -14, w: 15, side: -1 },
+  { type: 'kicker',  z: -3240, h: 12,   len: 36, off: 4,   w: 24 },
+  { type: 'drop',    z: -3500, h: 19,   len: 30, off: 0,   w: 38 },
+  { type: 'roller',  z: -3740, h: 4.8,  len: 44, off: -6,  w: 26 },
+
+  // --- section 5: the money jump, then a technical stretch ----------------
+  { type: 'table',   z: -4000, h: 13,   len: 40, off: 0,   w: 28, gap: 70 },
+  { type: 'hip',     z: -4320, h: 11,   len: 36, off: 8,   w: 22, side: 1 },
+  { type: 'quarter', z: -4620, h: 11,   len: 74, off: 14,  w: 15, side: 1 },
+  { type: 'kicker',  z: -4900, h: 13,   len: 38, off: -5,  w: 24 },
+
+  // --- section 6: run to the line. Fast, flowing, one last hit. -----------
+  { type: 'roller',  z: -5160, h: 4.0,  len: 44, off: 0,   w: 28 },
+  { type: 'table',   z: -5400, h: 14,   len: 42, off: 3,   w: 28, gap: 78 },
+  { type: 'kicker',  z: -5740, h: 10,   len: 34, off: -4,  w: 24 },
+  { type: 'roller',  z: -6000, h: 2.6,  len: 48, off: 0,   w: 30 },
 ];
 
 /** Smooth 0..1 lateral falloff so features blend into the piste at their edges. */
@@ -241,7 +261,12 @@ function courseSurface(x, z, p, cx, halfWidth, lod) {
 
   // Banked turns — the course rolls into its own corners.
   const curvature = (lut(LUT_X, progressAt(z - 80)) - 2 * cx + lut(LUT_X, progressAt(z + 80))) / (80 * 80);
-  h += THREE.MathUtils.clamp(curvature * 1.2e4, -1, 1) * THREE.MathUtils.clamp(u, -1.4, 1.4) * 16;
+  // Banking is an ANGLE, not a fixed height. Expressing it as metres of rise
+  // at the edge meant narrowing the track turned every corner into a ~55deg
+  // wall the rider slid down and stalled against. tan(22deg) ~= 0.40 at full
+  // lock, scaled by the local half-width.
+  const bank = THREE.MathUtils.clamp(curvature * 1.6e4, -1, 1) * 0.40;
+  h += THREE.MathUtils.clamp(u, -1.2, 1.2) * halfWidth * bank;
 
   // Gentle rollers down the fall line — rideable, pumpable, never a wall.
   h += Math.sin(z * 0.017 + Math.sin(z * 0.0031) * 2.0) * 4.2;
@@ -250,9 +275,13 @@ function courseSurface(x, z, p, cx, halfWidth, lod) {
   // Snow surface texture, retired band by band as the sample spacing grows.
   // A 12cm wind ripple evaluated at a vertex 200m from its neighbour is pure
   // cost: it cannot be represented, and it only aliases.
-  if (lod < 30) h += fbm2(x * 0.013, z * 0.013, lod < 8 ? 4 : 2) * 2.6;
-  if (lod < 4) h += fbm2(x * 0.085, z * 0.085, 3) * 0.42;
-  if (lod < 1) h += Math.sin(x * 0.5 + fbm2(x * 0.04, z * 0.04, 2) * 6.0) * 0.09;
+  //
+  // Amplitudes here are deliberately small. A groomed race line has to be
+  // smooth enough to hold an edge on; lumpy noise underfoot reads as a messy
+  // hillside and makes the carve feel vague.
+  if (lod < 30) h += fbm2(x * 0.013, z * 0.013, lod < 8 ? 4 : 2) * 0.9;
+  if (lod < 4) h += fbm2(x * 0.085, z * 0.085, 3) * 0.18;
+  if (lod < 1) h += Math.sin(x * 0.5 + fbm2(x * 0.04, z * 0.04, 2) * 6.0) * 0.06;
 
   return h;
 }
@@ -264,25 +293,39 @@ function courseSurface(x, z, p, cx, halfWidth, lod) {
  * is what keeps the corridor open and rideable.
  */
 function relief(x, z, distFromCourse, halfWidth, lod) {
-  // Rise profile: flat shoulder just off the piste, then walls over ~800m.
-  const d = Math.max(0, distFromCourse - halfWidth * 1.15);
-  const near = smoothstep(0, 90, d);        // low banks framing the run
-  const far = smoothstep(60, 850, d);       // the actual mountain flanks
+  // Distance outside the groomed ribbon.
+  const d = distFromCourse - halfWidth;
 
-  // On the groomed corridor both masks are zero, so none of the expensive
-  // multifractal work below contributes anything. That is the common case for
-  // every vertex the rider can actually touch.
-  if (near <= 0 && far <= 0) return 0;
+  // Inside the ribbon: perfectly clean. Nothing here, ever. This is what makes
+  // the course read as a built track rather than a patch of open mountain, and
+  // it also skips all the multifractal work for every vertex the rider can
+  // actually ride on.
+  if (d <= 0) return 0;
+
+  // --- berm ---------------------------------------------------------------
+  // A banked wall rising straight off the edge of the piste, like the lip of a
+  // bobsleigh run. It is rideable: you can carve up it, and it holds a bad
+  // line in rather than letting the rider wander into scenery. This single
+  // feature is most of what makes a course feel like a course.
+  const bermT = smoothstep(0, BERM_RUN, d);
+  const berm = bermT * bermT * BERM_H;
+
+  // --- shoulder and flanks -------------------------------------------------
+  const shoulder = smoothstep(BERM_RUN, BERM_RUN + 140, d);
+  const far = smoothstep(BERM_RUN + 90, 900, d);
+
+  let r = berm;
+  if (shoulder <= 0 && far <= 0) return r;
 
   const crest = Math.pow(THREE.MathUtils.clamp(ridged2(x * 0.00042, z * 0.00042, lod < 60 ? 5 : 3), 0, 1), 1.4);
   const bulk = fbm2(x * 0.0016, z * 0.0016, lod < 60 ? 4 : 2) * 0.5 + 0.5;
 
-  let r = near * (14 + bulk * 26);                       // banks
-  r += far * far * (crest * 1150 + bulk * 320);          // flanks and peaks
-  // Mid-scale broken ground off-piste so the flanks aren't smooth ramps.
-  // Its finest band is ~50m, so it is meaningless past that sample spacing.
-  if (near > 0 && lod < 50) {
-    r += near * (fbm2(x * 0.006, z * 0.006, 4) * 9
+  r += shoulder * (10 + bulk * 22);
+  r += far * far * (crest * 1150 + bulk * 320);
+  // Broken ground beyond the berm so the flanks are not smooth ramps. Kept
+  // off the berm itself, which must stay clean enough to carve.
+  if (shoulder > 0 && lod < 50) {
+    r += shoulder * (fbm2(x * 0.006, z * 0.006, 4) * 9
       + (lod < 12 ? ridged2(x * 0.02, z * 0.02, 3) * 4 : 0));
   }
   return r;
