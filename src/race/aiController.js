@@ -75,7 +75,7 @@ export class AIController {
 
     // Better riders hold a tighter line; worse ones over- and under-steer.
     const gain = 1.4 + this.skill * 1.2;
-    inp.steer = clamp(-yawErr * gain, -1, 1);
+    inp.steer = clamp(yawErr * gain, -1, 1);
 
     // A hard correction at speed just scrubs; good riders know that.
     if (this.skill > 0.5 && b.speed > 45) inp.steer = clamp(inp.steer, -0.7, 0.7);
@@ -98,7 +98,7 @@ export class AIController {
         // Line up with the takeoff.
         const lipX = courseXAt(feat.z) + (feat.off || 0);
         const lineErr = lipX - b.pos.x;
-        inp.steer = clamp(inp.steer + lineErr * 0.05, -1, 1);
+        inp.steer = clamp(inp.steer - lineErr * 0.05, -1, 1);
 
         // Wind up and charge the ollie into the lip.
         if (distToFeat < 34) {

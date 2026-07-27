@@ -22,7 +22,7 @@
 import * as THREE from 'three';
 import { mulberry32 } from '../core/noise.js';
 import {
-  heightAt, courseXAt, courseAt, progressAt, courseFeatures, COURSE_LENGTH,
+  heightAt, courseXAt, courseAt, progressAt, courseFeatures, COURSE_LENGTH, BERM_RUN,
 } from './terrain.js';
 import {
   cyl, box, card, xf, span, paint, waveByX, atlasUV, mergeAll, truss, clamp,
@@ -104,6 +104,81 @@ function bNet(out, z0, zEnd, side, cell) {
       out.fabric.push(panel);
     }
     prev = { p, top };
+  }
+}
+
+
+/**
+ * Padded course wall.
+ *
+ * The reference SSX courses are bounded by solid painted crash padding, not by
+ * a line of thin flags — that hard, high-contrast edge is most of what makes
+ * the run read as a built venue at a glance, and it gives the eye something to
+ * judge speed and line against. Panels follow the course spline, sit on the
+ * snow surface at the foot of the berm, and alternate red/white with a yellow
+ * hazard run through the fast corners.
+ *
+ * Emitted as merged geometry per bucket, so a whole kilometre of wall is a
+ * handful of draw calls.
+ */
+function courseWall(out, z0, z1, side, rng) {
+  const STEP = 4.0;          // panel length
+  const H = 1.75;            // panel height
+  const T = 0.34;            // thickness
+  const MARGIN = BERM_RUN;   // crest of the berm — must match physics
+
+  let prev = null;
+  for (let z = Math.min(z1, -1); z >= z0 - STEP; z -= STEP) {
+    if (z > -8 || z < -COURSE_LENGTH + 4) { prev = null; continue; }
+    const p = edge(z, side, MARGIN);
+    if (!prev) { prev = p; continue; }
+
+    const dx = p.x - prev.x, dz = p.z - prev.z, dy = p.y - prev.y;
+    const horiz = Math.hypot(dx, dz);
+    if (horiz < 0.01) { prev = p; continue; }
+    const len = Math.hypot(horiz, dy);
+
+    // The panel's local +X must point along the segment. A rotation of yaw
+    // about Y sends +X to (cos, 0, -sin); a rotation of pitch about Z sends it
+    // to (cos, sin, 0). Euler XYZ applies Z first, then Y, which composes to
+    // exactly the orientation we want.
+    //
+    // Yawing alone — which is what the first version did — leaves every panel
+    // horizontal on a 20deg slope, so consecutive panels step down like a
+    // staircase and leave the wall full of gaps.
+    const yaw = Math.atan2(-dz, dx);
+    const pitch = Math.atan2(dy, horiz);
+    const midY = (p.y + prev.y) * 0.5;
+
+    // Hazard yellow through the corners, red/white elsewhere.
+    const k = curvature(z);
+    const hazard = Math.abs(k) > 3.0e-4;
+    const idx = Math.round(-z / STEP);
+    const col = hazard
+      ? (idx % 2 ? 0xf5c518 : 0x14161c)
+      : (idx % 2 ? 0xd8321f : 0xf2f4f8);
+
+    // Overlap slightly and bury the foot, so the wall is continuous and never
+    // shows daylight under it as the ground rolls.
+    const panel = box(len * 1.18, H, T);
+    paint(panel, col, 0.62);
+    xf(panel, {
+      p: [(p.x + prev.x) * 0.5, midY + H * 0.5 - 0.45, (p.z + prev.z) * 0.5],
+      r: [0, yaw, pitch],
+    });
+    out.matte.push(panel);
+
+    // A white cap rail along the top so the line reads cleanly from a distance
+    // and the wall does not dissolve into the snow behind it.
+    const cap = box(len * 1.18, 0.17, T * 1.3);
+    paint(cap, 0xf7f9fc, 0.45);
+    xf(cap, {
+      p: [(p.x + prev.x) * 0.5, midY + H - 0.42, (p.z + prev.z) * 0.5],
+      r: [0, yaw, pitch],
+    });
+    out.matte.push(cap);
+
+    prev = p;
   }
 }
 
@@ -218,6 +293,9 @@ const FEATURES = courseFeatures();
 export function emitCourse(sink, z0, z1, bucket) {
   const out = { matte: [], metal: [], fabric: [] };
   const rng = mulberry32(0x5EA51 ^ (bucket * 0x9e3779b1));
+
+  // ---- padded course walls, both sides ------------------------------------
+  for (const side of [-1, 1]) courseWall(out, z0, z1, side, rng);
 
   // ---- edge marker poles, every 20 m, both sides --------------------------
   const STEP = 20;

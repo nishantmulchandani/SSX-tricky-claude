@@ -19,8 +19,25 @@ export const COURSE_START_Y = 1750;
 
 // Banked wall bounding the run. Low enough to launch off, steep enough to hold
 // a line in. BERM_RUN is how far it takes to reach full height.
-const BERM_H = 11;
-const BERM_RUN = 16;
+// The banked wall bounding the run. This is what actually keeps riders on the
+// course: a 35deg bank they can carve up and that gravity rolls them back down.
+//
+// An explicit barrier constraint in the physics was tried instead and was
+// strictly worse — a hard position clamp pinned riders against the crest for
+// tens of seconds, and a velocity spring got eaten by edge grip, so they
+// drifted out and stayed out. The terrain already solves this; the padded wall
+// is drawn at the crest purely as the visual full stop.
+export const BERM_H = 11;
+export const BERM_RUN = 16;
+
+/**
+ * Lateral limit of the rideable course at a depth: the top of the berm, which
+ * is where the padded barrier stands. Physics and the props layer both use
+ * this so the wall you can see is exactly the wall you hit.
+ */
+export function trackLimitAt(z) {
+  return courseWidthAt(z) * 0.5 + BERM_RUN;
+}
 
 // --- course centre spline -------------------------------------------------
 // A hand-tuned meander so the run reads as a designed course, not noise.

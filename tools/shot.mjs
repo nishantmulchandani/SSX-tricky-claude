@@ -68,7 +68,8 @@ async function main() {
       // at the start gate and never appear in the frame.
       if (g.race) {
         g.race.racers.forEach((r, i) => {
-          const lateral = (i - (g.race.racers.length - 1) / 2) * 4.5;
+          // Player dead centre on the track; opponents fanned out around them.
+          const lateral = i === 0 ? 0 : ((i % 2 ? 1 : -1) * (3 + (i >> 1) * 4));
           // Downhill (more negative z) so they are in front of the camera.
           r.reset(s.z - (i === 0 ? 0 : 14 + (i % 3) * 11), lateral);
           r.body.pos.x = g.__courseX(r.body.pos.z) + lateral;
@@ -91,21 +92,28 @@ async function main() {
       const g = globalThis.__game;
       const sys = g.engine.systems.find((x) => x.fixedUpdate);
       const DT = 1 / 120;
+
+      // Drive the player with the AI controller for the settle.
+      //
+      // Hand-rolling a steering controller here kept putting the rider off the
+      // course and into the trees, which produced crash frames instead of
+      // gameplay frames. The AI already holds a racing line, hits features and
+      // spots its landings, and it is exercised by racetest — so captures use
+      // that rather than a second, untested driver. `steer` still forces a
+      // sustained carve when a shot explicitly asks for one.
+      const AI = g.race.racers[1].controller.constructor;
+      const saved = g.race.player.controller;
+      if (s.steer === undefined) {
+        g.race.player.controller = new AI({ skill: 0.95, seed: 7, lane: 0 });
+      }
+
       const steps = Math.round((s.settle ?? 2.2) / DT);
       for (let i = 0; i < steps; i++) {
-        // Steering MUST be injected through actions, not axis.steer:
-        // input.poll() runs at the top of fixedUpdate and recomputes the axis
-        // from key state, silently overwriting anything written directly.
         if (s.steer !== undefined) {
           g.input.actions.right = s.steer > 0;
           g.input.actions.left = s.steer < 0;
-        } else {
-          const cx = g.__courseX(g.body.pos.z);
-          const err = (g.body.pos.x - cx) * 0.02 + g.body.vel.x * 0.05;
-          g.input.actions.right = err > 0.08;
-          g.input.actions.left = err < -0.08;
+          g.input.actions.tuck = true;
         }
-        g.input.actions.tuck = true;
         sys.fixedUpdate(DT, i * DT);
         // VFX, the rider rig and the camera live in the VARIABLE-rate update,
         // not fixedUpdate. Software rendering only reaches ~0.5fps here, so
@@ -114,6 +122,7 @@ async function main() {
         if (i % 2 === 0) sys.update(DT * 2, 0, i * DT);
         if (i % 240 === 0) await new Promise((r) => setTimeout(r, 0));
       }
+      g.race.player.controller = saved;
     }, s);
     // Now give the renderer real time to actually draw the frame.
     await page.waitForTimeout((s.wait ?? 3) * 1000);

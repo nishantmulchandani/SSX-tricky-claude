@@ -11,7 +11,7 @@
  */
 import { Racer } from '../src/race/racer.js';
 import { AIController } from '../src/race/aiController.js';
-import { COURSE_LENGTH, courseXAt, courseWidthAt } from '../src/world/terrain.js';
+import { COURSE_LENGTH, courseXAt, trackLimitAt } from '../src/world/terrain.js';
 import { FIXED_DT as DT } from '../src/core/engine.js';
 
 const failures = [];
@@ -62,8 +62,11 @@ for (let step = 0; step < MAX_T / DT; step++) {
     // How far outside the ribbon does it stray? Being a few metres out is the
     // berm, and carving up the berm is legitimate riding — only count a racer
     // as off course once it is past the berm entirely.
-    const off = Math.abs(r.body.pos.x - courseXAt(r.body.pos.z)) - courseWidthAt(r.body.pos.z) * 0.5;
-    if (off > 16) s.offTrack += DT;
+    // Measure against the real barrier line rather than a hard-coded distance:
+    // riding the berm is legitimate, being past the wall is not. A fixed
+    // threshold silently became meaningless when the berm was resized.
+    const off = Math.abs(r.body.pos.x - courseXAt(r.body.pos.z)) - trackLimitAt(r.body.pos.z);
+    if (off > 1) s.offTrack += DT;
 
     if (r.body.grounded && r.body.speed < 4) { s._stall += DT; s.stalled = Math.max(s.stalled, s._stall); }
     else s._stall = 0;

@@ -29,7 +29,7 @@ for (let i = 0; i < 120 * 400; i++) { // up to 400 simulated seconds
   const cx = courseXAt(body.pos.z);
   const half = Math.max(8, courseWidthAt(body.pos.z) * 0.5);
   const err = (body.pos.x - cx) / half;
-  const steer = Math.max(-0.6, Math.min(0.6, err * 0.9 + body.vel.x * 0.05));
+  const steer = Math.max(-0.6, Math.min(0.6, -(err * 0.9 + body.vel.x * 0.05)));
 
   body.step(FIXED_DT, {
     steer,

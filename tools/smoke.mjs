@@ -111,8 +111,8 @@ if (!booted) {
       // from key state at the top of fixedUpdate and would overwrite it.
       const cx = g.__courseX ? g.__courseX(g.body.pos.z) : 0;
       const err = (g.body.pos.x - cx) * 0.02 + g.body.vel.x * 0.05;
-      g.input.actions.right = err > 0.08;
-      g.input.actions.left = err < -0.08;
+      g.input.actions.left = err > 0.08;
+      g.input.actions.right = err < -0.08;
       const phase = i % 120;
       g.input.actions.jump = phase < 30;
       g.input.released.jump = phase === 30;

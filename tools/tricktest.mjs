@@ -11,7 +11,17 @@
  */
 import { BoardPhysics } from '../src/physics/board.js';
 import { TrickSystem } from '../src/tricks/trickSystem.js';
-import { heightAt, courseXAt } from '../src/world/terrain.js';
+import { heightAt, courseXAt, courseWidthAt, courseFeatures } from '../src/world/terrain.js';
+
+const JUMPS = courseFeatures()
+  .filter((f) => f.type === 'kicker' || f.type === 'table' || f.type === 'hip')
+  .sort((a, b) => b.z - a.z);
+
+/** Distance to the next takeoff lip ahead, or Infinity. */
+function toNextLip(z) {
+  for (const f of JUMPS) if (f.z < z - 2) return z - f.z;
+  return Infinity;
+}
 
 /**
  * How far the rider is above the snow. Used by the scripted "player" to spot
@@ -55,12 +65,32 @@ function run({ startZ = -440, seconds = 12, script = () => {}, stopWhen = null }
   body.reset(startZ);
   body.vel.set(0, 0, -42);           // arrive with real speed
 
-  const log = { maxAir: 0, airStart: null, airs: [], landed: false, names: [], events: [], maxYaw: 0, phases: new Set() };
+  const log = { maxAir: 0, airStart: null, airs: [], landed: false, names: [], events: [], maxYaw: 0, maxBoost: 0, phases: new Set() };
   let t = 0;
 
   for (let i = 0; i < Math.round(seconds / DT); i++) {
+    // Hold the racing line. Negative because positive steer turns right:
+    // sitting right of the centre line means steering left to get back.
+    // Normalised by the track half-width so this stays correct if the course
+    // is ever re-tuned — a fixed per-metre gain silently became too weak to
+    // hold the line when the ribbon was narrowed.
     const cx = courseXAt(body.pos.z);
-    input.axis.steer = Math.max(-1, Math.min(1, (body.pos.x - cx) * 0.02 + body.vel.x * 0.05));
+    const half = Math.max(8, courseWidthAt(body.pos.z) * 0.5);
+    const lat = (body.pos.x - cx) / half;
+    // Clamped fairly tight. Takeoff samples the stick to decide spin, so a
+    // scripted rider holding a hard corrective carve into every lip launches
+    // into an unplanned rotation and bails — which is correct behaviour, but
+    // it means the test would be measuring a bad player rather than the
+    // trick system.
+    // Hold the line firmly, but settle the stick on the approach to a lip.
+    // Takeoff samples the stick to decide spin, so a rider still hauling on a
+    // corrective carve as they leave the ramp launches into an unplanned
+    // rotation and bails. Real players straighten up before a jump; a test
+    // driver that does not is measuring itself, not the trick system.
+    const lip = toNextLip(body.pos.z);
+    const settle = lip < 26 ? 0.18 : 1.0;
+    input.axis.steer = Math.max(-0.6, Math.min(0.6,
+      -(lat * 0.9 + body.vel.x * 0.05))) * settle;
     input.axis.pitch = -1;
     script(t, { body, tricks, input });
 
@@ -82,6 +112,7 @@ function run({ startZ = -440, seconds = 12, script = () => {}, stopWhen = null }
       log.landed = true;
     }
     log.maxYaw = Math.max(log.maxYaw, Math.abs(tricks.rotation?.yaw ?? 0));
+    log.maxBoost = Math.max(log.maxBoost, tricks.scorer?.boost ?? 0);
     log.phases.add(tricks.phase);
     if (tricks.current && !log.names.includes(tricks.current)) log.names.push(tricks.current);
     for (const e of tricks.events || []) {
@@ -95,6 +126,32 @@ function run({ startZ = -440, seconds = 12, script = () => {}, stopWhen = null }
 }
 
 console.log('=== TRICK SYSTEM TEST ===\n');
+
+// 0. Control polarity. This is worth asserting on its own: the steer sign was
+//    inverted for a long time — pressing right turned the rider left — and it
+//    went unnoticed because the AI and every test driver were written against
+//    the inverted convention and silently cancelled it out.
+{
+  const b = new BoardPhysics();
+  b.reset(-1000);
+  b.vel.set(0, 0, -30);
+  const x0 = b.pos.x;
+  for (let i = 0; i < 180; i++) {
+    b.step(DT, { steer: 1, pitch: -1, jumpHeld: false, jumpReleased: false, brake: false });
+  }
+  const drift = b.pos.x - x0;
+  check('steering right moves the rider right (+X)', drift > 1, `drift ${drift.toFixed(1)}m`);
+
+  const b2 = new BoardPhysics();
+  b2.reset(-1000);
+  b2.vel.set(0, 0, -30);
+  const x1 = b2.pos.x;
+  for (let i = 0; i < 180; i++) {
+    b2.step(DT, { steer: -1, pitch: -1, jumpHeld: false, jumpReleased: false, brake: false });
+  }
+  const drift2 = b2.pos.x - x1;
+  check('steering left moves the rider left (-X)', drift2 < -1, `drift ${drift2.toFixed(1)}m`);
+}
 
 // 1. Baseline: a straight run off a kicker should produce air and land clean.
 {
@@ -129,11 +186,14 @@ console.log('=== TRICK SYSTEM TEST ===\n');
   check('a rotation trick gets named with a degree count', named.length > 0, named.slice(0, 3).join(', ') || 'none');
 }
 
-// 3. Grab: hold a grab through the air.
+// 3. Grab: hold a grab through the air and let go to land it.
 {
   const { tricks, log } = run({
-    startZ: -440, seconds: 10,
-    script: (t, { body, input }) => { input.set('grab1', !body.grounded); },
+    startZ: -960, seconds: 25,
+    script: (t, { body, input }) => {
+      const spotting = body.vel.y < 0 && altitude(body) < 6;
+      input.set('grab1', !body.grounded && body.airTime > 0.15 && !spotting);
+    },
   });
   const grabNames = log.names.filter((n) => n && n !== 'Straight Air');
   check('grab input registers a named grab trick', grabNames.length > 0, grabNames.slice(0, 3).join(', ') || 'none');
@@ -156,7 +216,12 @@ console.log('=== TRICK SYSTEM TEST ===\n');
   // the wrong number.
   tricks.bankAll();
   check('score accumulates over a multi-feature run', tricks.score > 0, `score=${Math.round(tricks.score)}`);
-  check('boost meter fills from landed tricks', tricks.boost > 0, `boost=${tricks.boost.toFixed(2)}`);
+  // Assert on the PEAK, not the final value: the meter drains continuously, so
+  // a long run with one early trick legitimately ends at zero.
+  const landed = (tricks.tricks?.length ?? 0) > 0;
+  check('boost meter fills from landed tricks',
+    !landed || log.maxBoost > 0,
+    `landed=${tricks.tricks?.length ?? 0} peak boost=${log.maxBoost.toFixed(3)}`);
   check('tricks are recorded in the log', (tricks.tricks?.length ?? 0) > 0, `${tricks.tricks?.length ?? 0} entries`);
   check('combo multiplier is at least 1', tricks.combo >= 1, `x${tricks.combo}`);
   console.log('\n  [diag] phases seen:', [...log.phases].join(', '));

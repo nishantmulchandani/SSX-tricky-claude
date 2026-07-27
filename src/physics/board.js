@@ -96,10 +96,16 @@ export class BoardPhysics {
       const speedFactor = THREE.MathUtils.clamp(this.speed / 26, 0.15, 1.6);
       // Turn rate falls off at high speed — you commit to a line, you don't pivot.
       const turnRate = THREE.MathUtils.lerp(3.2, 1.15, THREE.MathUtils.clamp(this.speed / 55, 0, 1));
-      this.yaw -= input.steer * turnRate * dt * speedFactor;
+      // Sign convention: POSITIVE steer turns right. `forward` is
+      // (sin yaw, 0, -cos yaw), so heading right means increasing yaw.
+      // This was subtracting, which meant pressing D/right steered the rider
+      // LEFT — the controls were mirrored for every human player, while the
+      // AI and the ride test happened to be written against the inverted sign
+      // and so never caught it.
+      this.yaw += input.steer * turnRate * dt * speedFactor;
 
       // Edge angle follows steering with lag; that lag *is* the carve feel.
-      const targetRoll = -input.steer * 0.72 * THREE.MathUtils.clamp(this.speed / 30, 0, 1);
+      const targetRoll = input.steer * 0.72 * THREE.MathUtils.clamp(this.speed / 30, 0, 1);
       this.roll += (targetRoll - this.roll) * (1 - Math.exp(-9 * dt));
       this.edge = THREE.MathUtils.clamp(this.roll / 0.72, -1, 1);
 
