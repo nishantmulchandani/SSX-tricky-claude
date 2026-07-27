@@ -10,6 +10,9 @@ export class ChaseCamera {
   constructor(camera) {
     this.camera = camera;
     this.pos = new THREE.Vector3(0, 6, 10);
+    // Rider-relative springs; see update().
+    this.offset = new THREE.Vector3(0, 2, 5);
+    this.lookOffset = new THREE.Vector3(0, 1.75, -5);
     this.look = new THREE.Vector3();
     this.vel = new THREE.Vector3();
     this.lookVel = new THREE.Vector3();
@@ -26,8 +29,10 @@ export class ChaseCamera {
   /** Teleport the rig — used after a respawn so the camera does not fly across the map. */
   snap(body) {
     const fwd = body.forward;
-    this.pos.copy(body.pos).addScaledVector(fwd, -5).add(new THREE.Vector3(0, 2.0, 0));
-    this.look.copy(body.pos).addScaledVector(fwd, 6).add(new THREE.Vector3(0, 1.75, 0));
+    this.offset.set(-fwd.x * 4.0, 1.85, -fwd.z * 4.0);
+    this.lookOffset.set(fwd.x * 4.0, 1.75, fwd.z * 4.0);
+    this.pos.copy(body.pos).add(this.offset);
+    this.look.copy(body.pos).add(this.lookOffset);
     this.vel.set(0, 0, 0);
     this.lookVel.set(0, 0, 0);
     this.camera.position.copy(this.pos);
@@ -36,6 +41,15 @@ export class ChaseCamera {
 
   update(dt, body) {
     const speed01 = THREE.MathUtils.clamp(body.speed / 62, 0, 1);
+    // NOTE: everything below springs in RIDER-RELATIVE space.
+    //
+    // Springing the camera's world position at a target that is itself moving
+    // at 60+ m/s leaves a permanent steady-state lag of speed/omega — about
+    // ten metres at race pace. That is why the rider crept further and further
+    // up the screen the faster you went: the camera was never catching up, it
+    // was tracking a fixed distance behind where it should have been.
+    // Springing the offset instead makes constant-velocity motion lag-free,
+    // and the spring only has to absorb genuine changes of direction.
     // Close and low, deliberately. The rider should read as a character you
     // are driving — board graphic legible, arms and lean visible, filling a
     // good third of the frame — not a distant speck on a hillside. Sitting
@@ -45,24 +59,25 @@ export class ChaseCamera {
       + (body.grounded ? 0 : Math.min(2.0, body.airTime * 1.5));
 
     const fwd = body.forward;
-    this._desired.copy(body.pos)
-      .addScaledVector(fwd, -back)
-      .add(new THREE.Vector3(0, height, 0));
+    this._desired.set(-fwd.x * back, height, -fwd.z * back);
 
-    // Keep the camera above the terrain behind the rider.
-    const floor = heightAt(this._desired.x, this._desired.z) + 1.15;
-    if (this._desired.y < floor) this._desired.y = floor;
+    const stiff = body.grounded ? 42 : 24;
+    spring(this.offset, this.vel, this._desired, stiff, dt);
+    this.pos.copy(body.pos).add(this.offset);
 
-    // Critically-damped spring — stiffer on the ground, floatier in the air.
-    const stiff = body.grounded ? 46 : 26;
-    spring(this.pos, this.vel, this._desired, stiff, dt);
+    // Keep the camera above the snow behind the rider.
+    const floor = heightAt(this.pos.x, this.pos.z) + 1.15;
+    if (this.pos.y < floor) {
+      this.pos.y = floor;
+      this.offset.y = floor - body.pos.y;
+    }
 
     // Aim just over the rider's shoulder rather than far down the hill, which
     // is what keeps them low-centre in frame instead of shrinking to a dot.
-    this._target.copy(body.pos)
-      .addScaledVector(fwd, 3.4 + speed01 * 3.2)
-      .add(new THREE.Vector3(0, 1.75, 0));
-    spring(this.look, this.lookVel, this._target, 30, dt);
+    const aim = 3.4 + speed01 * 3.2;
+    this._target.set(fwd.x * aim, 1.75, fwd.z * aim);
+    spring(this.lookOffset, this.lookVel, this._target, 26, dt);
+    this.look.copy(body.pos).add(this.lookOffset);
 
     // Speed FOV. A wide lens sells velocity but shrinks the rider, and at 80deg
     // the character became a dot — the whole point of pulling the camera in.

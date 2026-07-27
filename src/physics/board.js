@@ -1,8 +1,14 @@
 import * as THREE from 'three';
-import { heightAt, normalInto } from '../world/terrain.js';
+import { heightAt, normalInto, courseXAt } from '../world/terrain.js';
 
 const GRAVITY = 22.0;          // exaggerated — SSX gravity, not Earth gravity
 const RIDE_HEIGHT = 0.09;
+const SELF_CENTRE = 1.15;      // rad/s of yaw pull towards the direction of travel
+// How far the board may point away from the course direction while carving.
+// This is the difference between an arcade racer and an ice rink: without it,
+// a sustained input keeps integrating yaw until the rider is travelling
+// sideways at 40 m/s and oscillating +/-47m across the track.
+const MAX_CARVE = 0.58;        // radians (~33 deg)
 const SOFT_MAX_SPEED = 66;     // m/s (~240 km/h) — governed arcade top speed
 const UP = new THREE.Vector3(0, 1, 0);
 
@@ -93,16 +99,49 @@ export class BoardPhysics {
       }
 
       // ---- steering / carving ----------------------------------------------
-      const speedFactor = THREE.MathUtils.clamp(this.speed / 26, 0.15, 1.6);
-      // Turn rate falls off at high speed — you commit to a line, you don't pivot.
-      const turnRate = THREE.MathUtils.lerp(3.2, 1.15, THREE.MathUtils.clamp(this.speed / 55, 0, 1));
+      //
+      // Turn authority falls MONOTONICALLY with speed. It used to be multiplied
+      // by a speedFactor that climbed to 1.6, so authority peaked in the middle
+      // of the range: 146 deg/s at full lock around 35 m/s, which is a spin-out,
+      // not a carve. The faster you were going the more the board wanted to
+      // throw itself sideways.
+      //
       // Sign convention: POSITIVE steer turns right. `forward` is
       // (sin yaw, 0, -cos yaw), so heading right means increasing yaw.
-      // This was subtracting, which meant pressing D/right steered the rider
-      // LEFT — the controls were mirrored for every human player, while the
-      // AI and the ride test happened to be written against the inverted sign
-      // and so never caught it.
-      this.yaw += input.steer * turnRate * dt * speedFactor;
+      const fast = THREE.MathUtils.clamp(this.speed / 55, 0, 1);
+      const turnRate = THREE.MathUtils.lerp(1.30, 0.55, fast);   // rad/s at full lock
+      this.yaw += input.steer * turnRate * dt;
+
+      // Clamp the heading to a carve angle either side of the course direction.
+      // Steering past this simply has no further effect, so the board can never
+      // be spun broadside at speed and the rider always ends up pointing down
+      // the hill. It is what stops a clumsy input from turning into a spin-out.
+      const courseYaw = Math.atan2(
+        courseXAt(this.pos.z - 8) - courseXAt(this.pos.z + 8), 16);
+      let rel = this.yaw - courseYaw;
+      while (rel > Math.PI) rel -= Math.PI * 2;
+      while (rel < -Math.PI) rel += Math.PI * 2;
+      if (rel > MAX_CARVE) this.yaw = courseYaw + MAX_CARVE;
+      else if (rel < -MAX_CARVE) this.yaw = courseYaw - MAX_CARVE;
+
+      // Self-centring: with the stick released the board settles onto the
+      // direction it is actually TRAVELLING, so it stops turning and tracks
+      // straight. Gravity still pulls the line downhill over time, which is
+      // what you want, but the board never rotates on its own.
+      //
+      // Aiming this at the fall line instead — the obvious-looking choice —
+      // is badly wrong: on any traversing or banked section the fall line
+      // points across the course, so the board steers itself up to 90 degrees
+      // away from its direction of travel with no input at all.
+      const steerMag = Math.abs(input.steer);
+      if (steerMag < 0.35 && this.speed > 2) {
+        const velYaw = Math.atan2(this.vel.x, -this.vel.z);
+        let err = velYaw - this.yaw;
+        while (err > Math.PI) err -= Math.PI * 2;
+        while (err < -Math.PI) err += Math.PI * 2;
+        const authority = (1 - steerMag / 0.35) * SELF_CENTRE;
+        this.yaw += THREE.MathUtils.clamp(err, -1, 1) * authority * dt;
+      }
 
       // Edge angle follows steering with lag; that lag *is* the carve feel.
       const targetRoll = input.steer * 0.72 * THREE.MathUtils.clamp(this.speed / 30, 0, 1);

@@ -428,8 +428,17 @@ export class TrickSystem {
     }
     R.spinRate = clamp(R.spinRate, -maxSpin, maxSpin);
 
-    // Flips
-    const flipIn = -input.axis.pitch;
+    // Flips.
+    //
+    // Gated on the same tuck-versus-flick test that takeoff uses. The pitch
+    // axis is ALSO the tuck control, and every player holds tuck to carry
+    // speed — so reading it as continuous flip torque meant that simply
+    // holding W turned every single jump into an uncontrolled backflip that
+    // landed at 90+ degrees of pitch error and bailed. That, not the trick
+    // table, is why the game appeared to have no tricks at all: the rotation
+    // was real, but nothing could ever be landed.
+    const flick = 1 - smoothstep01(FEEL.TUCK_FLICK_GRACE, FEEL.TUCK_HOLD_TIME, this._pitchHold);
+    const flipIn = -input.axis.pitch * flick;
     if (Math.abs(flipIn) > 0.05) {
       const dir = Math.sign(flipIn);
       const opposing = R.flipRate !== 0 && Math.sign(R.flipRate) !== dir;

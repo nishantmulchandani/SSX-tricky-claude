@@ -41,10 +41,17 @@ export function trackLimitAt(z) {
 
 // --- course centre spline -------------------------------------------------
 // A hand-tuned meander so the run reads as a designed course, not noise.
+// Sweeping, flowing turns — not a slalom.
+//
+// This used to swing +/-95m in X against a ~21m half-width, which meant the
+// track was permanently running away sideways faster than a player could
+// correct: even a committed corrective input could not hold the course. A race
+// line should curve enough to be interesting and read as a designed circuit,
+// while staying rideable at 60 m/s.
 const CTRL = [
-  [0, 0], [18, 0.06], [-40, 0.13], [-70, 0.2], [-20, 0.27],
-  [55, 0.34], [95, 0.41], [40, 0.48], [-30, 0.55], [-95, 0.62],
-  [-60, 0.69], [10, 0.76], [70, 0.83], [30, 0.9], [0, 1.0],
+  [0, 0], [6, 0.06], [-14, 0.13], [-26, 0.21], [-10, 0.28],
+  [18, 0.35], [32, 0.42], [16, 0.49], [-12, 0.56], [-34, 0.63],
+  [-22, 0.70], [4, 0.77], [26, 0.84], [12, 0.91], [0, 1.0],
 ];
 const _curve = new THREE.CatmullRomCurve3(
   CTRL.map(([x, t]) => new THREE.Vector3(x, 0, -t * COURSE_LENGTH)),
@@ -71,7 +78,7 @@ const LUT_W = new Float64Array(LUT_N);
     // Track width. Deliberately narrow and fairly consistent: SSX courses read
     // as a ribbon you are held inside, not an open field. It opens a little in
     // the middle third for the big feature sections and pinches at the gates.
-    LUT_W[i] = 30 + 12 * Math.sin(c * Math.PI) + 3.5 * Math.sin(c * 7.0);
+    LUT_W[i] = 38 + 14 * Math.sin(c * Math.PI) + 4.0 * Math.sin(c * 7.0);
   }
 }
 
