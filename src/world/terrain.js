@@ -29,19 +29,54 @@ const _curve = new THREE.CatmullRomCurve3(
   false, 'catmullrom', 0.5,
 );
 
+// --- baked course tables --------------------------------------------------
+/**
+ * heightAt() needs the course centre and width at several z values per call,
+ * and CatmullRomCurve3.getPointAt does an arc-length binary search every time —
+ * roughly 550ns a lookup. Baking the spline into a flat table once at module
+ * load turns that into two array reads and a lerp.
+ */
+const LUT_N = 2048;
+const LUT_DZ = COURSE_LENGTH / (LUT_N - 1);
+const LUT_X = new Float64Array(LUT_N);
+const LUT_W = new Float64Array(LUT_N);
+{
+  const p = new THREE.Vector3();
+  for (let i = 0; i < LUT_N; i++) {
+    const c = i / (LUT_N - 1);
+    _curve.getPointAt(c, p);
+    LUT_X[i] = p.x;
+    // Course pinches at the top (start gate) and flares through the mid-section.
+    LUT_W[i] = 46 + 34 * Math.sin(c * Math.PI) + 10 * Math.sin(c * 11.0);
+  }
+}
+
+/** Linear sample of a baked table by course parameter t in [0,1]. */
+function lut(table, t) {
+  const f = (t <= 0 ? 0 : t >= 1 ? 1 : t) * (LUT_N - 1);
+  const i = f | 0;
+  if (i >= LUT_N - 1) return table[LUT_N - 1];
+  const a = table[i];
+  return a + (table[i + 1] - a) * (f - i);
+}
+
+const _cPos = new THREE.Vector3();
+const _cTan = new THREE.Vector3();
 export function courseAt(t) {
   const c = THREE.MathUtils.clamp(t, 0, 1);
-  const pos = _curve.getPointAt(c);
-  const tangent = _curve.getTangentAt(c);
-  // Course pinches at the top (start gate) and flares through the mid-section.
-  const width = 46 + 34 * Math.sin(c * Math.PI) + 10 * Math.sin(c * 11.0);
-  return { pos, tangent, width };
+  const pos = _curve.getPointAt(c, _cPos);
+  const tangent = _curve.getTangentAt(c, _cTan);
+  return { pos, tangent, width: lut(LUT_W, c) };
+}
+
+/** Course half-width at a depth z. Cheap — table lookup only. */
+export function courseWidthAt(z) {
+  return lut(LUT_W, -z / COURSE_LENGTH);
 }
 
 /** Course centre X for a given depth z (z is negative going downhill). */
 export function courseXAt(z) {
-  const t = THREE.MathUtils.clamp(-z / COURSE_LENGTH, 0, 1);
-  return _curve.getPointAt(t).x;
+  return lut(LUT_X, -z / COURSE_LENGTH);
 }
 
 export function progressAt(z) {
@@ -191,8 +226,8 @@ function smoothstep(a, b, x) {
  * 0 at the centre line, 1 at the edge of the groomed run, >1 off-piste.
  */
 export function lateralOffset(x, z) {
-  const { width } = courseAt(progressAt(z));
-  return (x - courseXAt(z)) / (width * 0.5);
+  const p = progressAt(z);
+  return (x - lut(LUT_X, p)) / (lut(LUT_W, p) * 0.5);
 }
 
 /**
@@ -200,22 +235,24 @@ export function lateralOffset(x, z) {
  * and fine snow texture. Smooth and continuous by construction — anything that
  * would buck the rider belongs in the relief term, not here.
  */
-function courseSurface(x, z, p, cx, halfWidth) {
+function courseSurface(x, z, p, cx, halfWidth, lod) {
   const u = (x - cx) / halfWidth; // -1 .. 1 across the groomed run
   let h = fallLine(p);
 
   // Banked turns — the course rolls into its own corners.
-  const curvature = (courseXAt(z - 80) - 2 * cx + courseXAt(z + 80)) / (80 * 80);
+  const curvature = (lut(LUT_X, progressAt(z - 80)) - 2 * cx + lut(LUT_X, progressAt(z + 80))) / (80 * 80);
   h += THREE.MathUtils.clamp(curvature * 1.2e4, -1, 1) * THREE.MathUtils.clamp(u, -1.4, 1.4) * 16;
 
   // Gentle rollers down the fall line — rideable, pumpable, never a wall.
   h += Math.sin(z * 0.017 + Math.sin(z * 0.0031) * 2.0) * 4.2;
   h += Math.sin(z * 0.052 + x * 0.004) * 1.15;
 
-  // Snow surface texture: drifts, then wind ripples.
-  h += fbm2(x * 0.013, z * 0.013, 4) * 2.6;
-  h += fbm2(x * 0.085, z * 0.085, 3) * 0.42;
-  h += Math.sin(x * 0.5 + fbm2(x * 0.04, z * 0.04, 2) * 6.0) * 0.09;
+  // Snow surface texture, retired band by band as the sample spacing grows.
+  // A 12cm wind ripple evaluated at a vertex 200m from its neighbour is pure
+  // cost: it cannot be represented, and it only aliases.
+  if (lod < 30) h += fbm2(x * 0.013, z * 0.013, lod < 8 ? 4 : 2) * 2.6;
+  if (lod < 4) h += fbm2(x * 0.085, z * 0.085, 3) * 0.42;
+  if (lod < 1) h += Math.sin(x * 0.5 + fbm2(x * 0.04, z * 0.04, 2) * 6.0) * 0.09;
 
   return h;
 }
@@ -226,32 +263,52 @@ function courseSurface(x, z, p, cx, halfWidth) {
  * noise does. Amplitude is driven entirely by distance from the course, which
  * is what keeps the corridor open and rideable.
  */
-function relief(x, z, distFromCourse, halfWidth) {
+function relief(x, z, distFromCourse, halfWidth, lod) {
   // Rise profile: flat shoulder just off the piste, then walls over ~800m.
   const d = Math.max(0, distFromCourse - halfWidth * 1.15);
   const near = smoothstep(0, 90, d);        // low banks framing the run
   const far = smoothstep(60, 850, d);       // the actual mountain flanks
 
-  const crest = Math.pow(THREE.MathUtils.clamp(ridged2(x * 0.00042, z * 0.00042, 5), 0, 1), 1.4);
-  const bulk = fbm2(x * 0.0016, z * 0.0016, 4) * 0.5 + 0.5;
+  // On the groomed corridor both masks are zero, so none of the expensive
+  // multifractal work below contributes anything. That is the common case for
+  // every vertex the rider can actually touch.
+  if (near <= 0 && far <= 0) return 0;
+
+  const crest = Math.pow(THREE.MathUtils.clamp(ridged2(x * 0.00042, z * 0.00042, lod < 60 ? 5 : 3), 0, 1), 1.4);
+  const bulk = fbm2(x * 0.0016, z * 0.0016, lod < 60 ? 4 : 2) * 0.5 + 0.5;
 
   let r = near * (14 + bulk * 26);                       // banks
   r += far * far * (crest * 1150 + bulk * 320);          // flanks and peaks
   // Mid-scale broken ground off-piste so the flanks aren't smooth ramps.
-  r += near * (fbm2(x * 0.006, z * 0.006, 4) * 9 + ridged2(x * 0.02, z * 0.02, 3) * 4);
+  // Its finest band is ~50m, so it is meaningless past that sample spacing.
+  if (near > 0 && lod < 50) {
+    r += near * (fbm2(x * 0.006, z * 0.006, 4) * 9
+      + (lod < 12 ? ridged2(x * 0.02, z * 0.02, 3) * 4 : 0));
+  }
   return r;
 }
 
-export function heightAt(x, z) {
+/**
+ * World Y of the snow surface.
+ *
+ * @param lod  world-space distance between neighbouring samples, in metres.
+ *   Detail bands finer than this are skipped: they cannot be represented at
+ *   that sampling rate and only cost time and aliasing. Physics and anything
+ *   needing the true surface must pass 0 (the default).
+ */
+export function heightAt(x, z, lod = 0) {
   const p = progressAt(z);
-  const { width } = courseAt(p);
-  const halfWidth = width * 0.5;
-  const cx = courseXAt(z);
+  // Table lookups only — courseAt() allocates a result object and walks the
+  // spline, which is far too heavy for the hot path.
+  const halfWidth = lut(LUT_W, p) * 0.5;
+  const cx = lut(LUT_X, p);
   const dist = Math.abs(x - cx);
 
-  return courseSurface(x, z, p, cx, halfWidth)
-    + relief(x, z, dist, halfWidth)
-    + featureHeight(x, z, cx);
+  let h = courseSurface(x, z, p, cx, halfWidth, lod)
+    + relief(x, z, dist, halfWidth, lod);
+  // Authored features are 25-100m long; past that spacing they are invisible.
+  if (lod < 40) h += featureHeight(x, z, cx);
+  return h;
 }
 
 const _n = new THREE.Vector3();

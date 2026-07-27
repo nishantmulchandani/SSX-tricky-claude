@@ -13,9 +13,34 @@ export function hash2(x, y) {
 function fade(t) { return t * t * t * (t * (t * 6 - 15) + 10); }
 function lerp(a, b, t) { return a + (b - a) * t; }
 
+/**
+ * Precomputed unit gradients.
+ *
+ * The obvious implementation derives the gradient with cos/sin of a hashed
+ * angle, which costs two transcendentals per corner — eight per noise sample,
+ * around two hundred per heightAt(). That made the terrain rebuild cost 327ms,
+ * twenty times an entire frame. A table lookup is identical in character and
+ * roughly free.
+ */
+const GRAD_N = 256;
+const GRAD_X = new Float64Array(GRAD_N);
+const GRAD_Y = new Float64Array(GRAD_N);
+for (let i = 0; i < GRAD_N; i++) {
+  const a = (i / GRAD_N) * Math.PI * 2;
+  GRAD_X[i] = Math.cos(a);
+  GRAD_Y[i] = Math.sin(a);
+}
+
+/** Integer hash -> gradient index. Same mixing as hash2, without the divide. */
+function gradIndex(x, y) {
+  let h = x * 374761393 + y * 668265263;
+  h = (h ^ (h >> 13)) * 1274126177;
+  return ((h ^ (h >> 16)) >>> 0) & (GRAD_N - 1);
+}
+
 function grad2(ix, iy, x, y) {
-  const a = hash2(ix, iy) * 6.28318530718;
-  return Math.cos(a) * x + Math.sin(a) * y;
+  const g = gradIndex(ix, iy);
+  return GRAD_X[g] * x + GRAD_Y[g] * y;
 }
 
 /** Perlin-style gradient noise in roughly [-1, 1]. */

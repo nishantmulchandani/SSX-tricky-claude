@@ -17,7 +17,7 @@ import { createSnowMaterial } from './snowMaterial.js';
  * RINGS*SEGMENTS height samples per frame, which is why heightAt is kept cheap.
  */
 export class Mountain {
-  constructor({ rings = 220, segments = 256, innerRadius = 1.6, outerRadius = 9000 } = {}) {
+  constructor({ rings = 176, segments = 208, innerRadius = 1.6, outerRadius = 9000 } = {}) {
     this.rings = rings;
     this.segments = segments;
 
@@ -25,6 +25,26 @@ export class Mountain {
     this.radii = new Float32Array(rings);
     const growth = Math.pow(outerRadius / innerRadius, 1 / (rings - 1));
     for (let i = 0; i < rings; i++) this.radii[i] = innerRadius * Math.pow(growth, i);
+
+    // Per-ring sample spacing, used as the LOD hint for heightAt. Tangential
+    // pitch is 2*pi*R/segments; radial pitch is the gap to the next ring.
+    this.ringLod = new Float32Array(rings);
+    // How far the camera must travel before this ring is worth re-sampling.
+    this.ringThreshold = new Float32Array(rings);
+    // Where each ring was last built (they drift apart by design).
+    this.ringX = new Float32Array(rings).fill(NaN);
+    this.ringZ = new Float32Array(rings).fill(NaN);
+    for (let i = 0; i < rings; i++) {
+      const tangential = (2 * Math.PI * this.radii[i]) / segments;
+      const radial = i + 1 < rings ? this.radii[i + 1] - this.radii[i] : tangential;
+      this.ringLod[i] = Math.max(tangential, radial);
+      // Half a vertex pitch: re-sampling sooner cannot change the surface by
+      // more than the ring's own linear-interpolation error already allows.
+      this.ringThreshold[i] = Math.min(300, Math.max(0.5, this.ringLod[i] * 0.5));
+    }
+    // Vertices re-sampled per update() call. ~1.6us each, so this bounds the
+    // terrain to roughly 4ms of a frame no matter how fast the rider moves.
+    this.vertexBudget = 2600;
 
     const count = rings * segments + 1; // +1 for the centre vertex
     const geo = new THREE.BufferGeometry();
@@ -93,32 +113,62 @@ export class Mountain {
     const SNAP = 0.5;
     const cx = Math.round(center.x / SNAP) * SNAP;
     const cz = Math.round(center.z / SNAP) * SNAP;
-    if (cx === this._center.x && cz === this._center.z) return;
-    this._center.set(cx, 0, cz);
 
     const { rings, segments, radii, dirX, dirZ, positions, normals, uvs } = this;
     const n = this._n;
 
-    // --- pass 1: sample the height field once per vertex ---------------------
-    // heightAt is the expensive call (multi-octave fbm + ridged noise), so it
-    // is evaluated exactly once per vertex and normals are derived from the
-    // neighbours we already have rather than 4 extra probes each.
-    positions[0] = cx; positions[1] = heightAt(cx, cz); positions[2] = cz;
-    uvs[0] = cx * 0.05; uvs[1] = cz * 0.05;
+    // --- decide which rings actually need re-sampling ------------------------
+    //
+    // Rebuilding every ring whenever the camera twitches is what made this
+    // cost 327ms a frame. A ring whose vertices sit 200m apart gains nothing
+    // from being re-sampled after 0.5m of travel: its surface barely changes,
+    // and it is kilometres away. Each ring therefore re-samples only once the
+    // camera has moved a meaningful fraction of that ring's own vertex pitch.
+    //
+    // Work is additionally capped per call, so a frame can never be swamped;
+    // the stalest rings are served first and the rest wait a frame or two.
+    let budget = this.vertexBudget;
+    let touched = false;
+    let dirtyLo = rings, dirtyHi = -1;
 
-    let v = 1;
     for (let r = 0; r < rings; r++) {
+      const threshold = this.ringThreshold[r];
+      const dx = cx - this.ringX[r];
+      const dz = cz - this.ringZ[r];
+      if (dx * dx + dz * dz < threshold * threshold) continue;
+      if (budget <= 0) break;
+      budget -= segments;
+      touched = true;
+      if (r < dirtyLo) dirtyLo = r;
+      if (r > dirtyHi) dirtyHi = r;
+
+      this.ringX[r] = cx;
+      this.ringZ[r] = cz;
+
       const rad = radii[r];
+      // Sample spacing for this ring: the larger of its radial and tangential
+      // vertex pitch. Detail finer than this cannot be represented here, so
+      // heightAt is told to skip those bands entirely.
+      const lod = this.ringLod[r];
+      let v = 1 + r * segments;
       for (let s = 0; s < segments; s++, v++) {
         const x = cx + dirX[s] * rad;
         const z = cz + dirZ[s] * rad;
         const i3 = v * 3, i2 = v * 2;
         positions[i3] = x;
-        positions[i3 + 1] = heightAt(x, z);
+        positions[i3 + 1] = heightAt(x, z, lod);
         positions[i3 + 2] = z;
         uvs[i2] = x * 0.05; uvs[i2 + 1] = z * 0.05;
       }
     }
+
+    if (!touched) return;
+    this._center.set(cx, 0, cz);
+    this._dirtyLo = Math.max(0, dirtyLo - 1);
+    this._dirtyHi = Math.min(rings - 1, dirtyHi + 1);
+
+    positions[0] = cx; positions[1] = heightAt(cx, cz); positions[2] = cz;
+    uvs[0] = cx * 0.05; uvs[1] = cz * 0.05;
 
     // --- pass 2: normals from the polar neighbourhood ------------------------
     // Cross the radial and tangential edge vectors. This automatically widens
@@ -127,10 +177,13 @@ export class Mountain {
     normalInto(n, cx, cz, 0.6);
     normals[0] = n.x; normals[1] = n.y; normals[2] = n.z;
 
-    v = 1;
-    for (let r = 0; r < rings; r++) {
+    // Only rings that moved need new normals — plus their immediate
+    // neighbours, since a normal is the cross product of edges reaching into
+    // the adjacent rings.
+    for (let r = this._dirtyLo; r <= this._dirtyHi; r++) {
       const inner = r > 0 ? 1 + (r - 1) * segments : 0;
       const outer = 1 + Math.min(r + 1, rings - 1) * segments;
+      let v = 1 + r * segments;
       for (let s = 0; s < segments; s++, v++) {
         const sPrev = (s - 1 + segments) % segments;
         const sNext = (s + 1) % segments;
