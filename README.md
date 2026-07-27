@@ -57,20 +57,42 @@ VFX and the camera all query it. Nothing may re-implement it.
 The world is composed rather than summed: a smooth `courseSurface` for the
 rideable run, plus a strictly non-negative `relief` term off-piste, so the run
 is guaranteed to sit at the bottom of its own valley whatever the noise does.
-On top of that sit 22 authored features — kickers, tabletops, quarterpipes,
-hips, drops and rollers — each with compact support so it only perturbs its own
-patch of mountain.
+On top of that sit 24 authored features — kickers, tabletops, quarterpipes,
+hips, drops, rollers, two long up-climbs and a half-pipe — each with compact
+support so it only perturbs its own patch of mountain.
+
+Two of those are worth calling out because their shape is the whole point:
+
+- **climb** — a 115–130 m uphill grade that crests into a launch. The rise uses
+  a power curve rather than a smoothstep, because a smoothstep flattens at its
+  summit and the fall line here already descends ~20°, so a profile that levels
+  off at the top leaves the rider still going downhill and they roll straight
+  over it. `t^p` keeps steepening into the lip, so the last stretch genuinely
+  points uphill and the launch is real.
+- **pipe** — 230 m of half-pipe, transitions on both edges. The transition is a
+  quarter-circle with a straight top: the circle is right at the bottom, where
+  it has to meet the floor without catching an edge, but its tangent goes
+  vertical at the coping and a vertical face stops a rider dead. Its deck is
+  short so the wall flows into the berm instead of stacking on top of it.
+
+Four checkpoint gantries sit on the section boundaries. They are not scenery:
+each stops the run clock and reports a split against the fastest run so far.
+`CHECKPOINTS` lives in `terrain.js` beside the features, because the props
+layer and the run clock have to agree on where a checkpoint is.
 
 ## Tests
 
-All four are headless and take seconds. Run them before every commit.
+All headless, and all but `smoke` take seconds. Run them before every commit.
 
 ```bash
-export CHROME_PATH=/opt/pw-browsers/chromium-1194/chrome-linux/chrome
+export CHROME_PATH=/opt/pw-browsers/chromium
 
 node tools/lintshaders.mjs        # static shader hazards
 node tools/ridetest.mjs           # is the whole course rideable?
-node tools/tricktest.mjs          # do tricks detect, name, judge and score?
+node tools/tricktest.mjs          # do tricks detect, name, judge, score and coach?
+node tools/racetest.mjs           # does the AI field finish, and do splits work?
+node tools/feeltest.mjs           # is the handling still in its tuned envelope?
+node tools/perftest.mjs           # terrain rebuild cost per frame
 node tools/audiotest.mjs          # render the audio graph offline, check the PCM
 node tools/smoke.mjs --seconds 6  # does the real page actually run?
 ```

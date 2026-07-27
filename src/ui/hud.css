@@ -99,21 +99,28 @@ html, body { width: 100%; height: 100%; overflow: hidden; background: #000; font
 
 /* ── background scrims: guarantee contrast over the snowfield ───────────── */
 .hud__scrim { position: absolute; pointer-events: none; }
+/* These were doing the job twice. Every block already sits on its own slab and
+   every piece of display type carries a 1.4px stroke and two shadows, so the
+   scrims only have to take the edge off — and at their original strength they
+   veiled the bottom third of the frame down to less than half its luminance
+   (measured: 133 -> 59 across a plain snow field). That is a third of the
+   image spent on contrast the HUD was not short of. */
 .hud__scrim--top {
-  left: 0; right: 0; top: 0; height: 24%;
-  background: linear-gradient(180deg, rgba(5,7,12,.72), rgba(5,7,12,.30) 46%, transparent);
+  left: 0; right: 0; top: 0; height: 18%;
+  background: linear-gradient(180deg, rgba(5,7,12,.50), rgba(5,7,12,.16) 42%, transparent);
 }
 .hud__scrim--bottom {
-  left: 0; right: 0; bottom: 0; height: 36%;
-  background: linear-gradient(0deg, rgba(5,7,12,.80), rgba(5,7,12,.34) 44%, transparent);
+  left: 0; right: 0; bottom: 0; height: 27%;
+  background: linear-gradient(0deg, rgba(5,7,12,.58), rgba(5,7,12,.16) 40%, transparent);
 }
 .hud__scrim--left {
-  left: 0; top: 0; bottom: 0; width: 42%;
-  background: linear-gradient(90deg, rgba(5,7,12,.52), transparent 70%);
-  opacity: .55;
+  left: 0; top: 0; bottom: 0; width: 38%;
+  background: linear-gradient(90deg, rgba(5,7,12,.44), transparent 68%);
+  opacity: .40;
   transition: opacity .3s ease;
 }
-.hud.has-chain .hud__scrim--left { opacity: 1; }
+/* The trick column only appears mid-combo, so the left scrim leans in then. */
+.hud.has-chain .hud__scrim--left { opacity: .78; }
 
 /* ── blocks: score + clock ──────────────────────────────────────────────── */
 .block {

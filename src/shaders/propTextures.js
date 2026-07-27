@@ -241,7 +241,11 @@ export function propAtlas() {
   signCell(ctx, CELL.seriesBanner, 'SUMMIT SERIES', '#101a2c', '#7fd4ff', 'STAGE 4 - TRICKY');
   signCell(ctx, CELL.blank, ' ', '#f2f4f8', '#f2f4f8');
   for (let k = 0; k < 4; k++) {
-    signCell(ctx, CELL.checkpoint1 + k, `CHECKPOINT ${k + 1}`, '#12301c', '#8dffb0', 'SPLIT TIME');
+    // Teal, to sit alongside the navy start gate and crimson finish without
+    // reading as either. The first pass used a near-black green, which from
+    // 300 m up the course looked like a hole punched in the sky rather than a
+    // gantry.
+    signCell(ctx, CELL.checkpoint1 + k, `CHECKPOINT ${k + 1}`, '#0d3a4a', '#8dffe4', 'SPLIT TIME');
   }
 
   const tex = new THREE.CanvasTexture(cv);

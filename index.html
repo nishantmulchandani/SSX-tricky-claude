@@ -5,6 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>SSX Tricky — Claude</title>
   <link rel="stylesheet" href="/src/ui/hud.css" />
+  <!-- Inline, so there is no /favicon.ico request. The browser's automatic
+       request for one was the only 404 the page produced, and the capture
+       tools treat a failed resource load as a hard error. -->
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%2306080e'/%3E%3Cpath d='M6 22 L16 7 L26 22 Z' fill='%23eaf6ff'/%3E%3Cpath d='M11 22 L16 14 L21 22 Z' fill='%2323e6ff'/%3E%3C/svg%3E" />
 </head>
 <body>
   <canvas id="stage"></canvas>

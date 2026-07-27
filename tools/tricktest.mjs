@@ -13,6 +13,7 @@ import { BoardPhysics } from '../src/physics/board.js';
 import { TrickSystem } from '../src/tricks/trickSystem.js';
 import { GRAB_BUTTONS, resolveGrab, composeTrickName } from '../src/tricks/trickTable.js';
 import { heightAt, courseXAt, courseWidthAt, courseFeatures } from '../src/world/terrain.js';
+import { Coach } from '../src/ui/coach.js';
 
 const JUMPS = courseFeatures()
   .filter((f) => f.type === 'kicker' || f.type === 'table' || f.type === 'hip')
@@ -342,6 +343,50 @@ console.log('=== TRICK SYSTEM TEST ===\n');
     }
   }
   check('a grab held through a real air reaches the live trick name', sawGrabName);
+}
+
+// 6c. The coach must have something to say at every feature.
+//
+//     A trick system nobody can find is the original complaint this file
+//     exists for, and the coach is the only thing that tells a player when to
+//     act. A feature type the coach does not know about is silent — the rider
+//     sails off it with no warning — and that is exactly what happened when
+//     climbs and the pipe were added, so it is asserted rather than eyeballed.
+{
+  const cue = new Coach();
+  const probe = { pos: { x: 0, y: 0, z: 0 }, grounded: true, crashed: false, vel: { y: 0 }, airTime: 0 };
+  const cuedNear = new Map();   // feature -> did the coach speak on its approach?
+
+  for (const f of courseFeatures()) {
+    if (f.type === 'roller' || f.type === 'drop' || f.type === 'quarter') continue;
+    // Walk the 60 m immediately before the feature and see if anything is said.
+    let spoke = false;
+    for (let d = 60; d >= 2; d -= 2) {
+      probe.pos.z = f.z + d;
+      if (cue.update(0.016, probe, null).title) { spoke = true; break; }
+    }
+    cuedNear.set(f, spoke);
+  }
+  const silent = [...cuedNear].filter(([, v]) => !v).map(([f]) => `${f.type}@${f.z}`);
+  console.log(`\n  [diag] coached features: ${cuedNear.size - silent.length}/${cuedNear.size}`);
+  check('every takeoff feature gets a coach cue on its approach', silent.length === 0,
+    silent.length ? 'silent: ' + silent.join(', ') : `${cuedNear.size} features`);
+
+  // And the release call has to actually land at the lip, not 50 m early.
+  const lips = [];
+  for (const f of courseFeatures()) {
+    if (f.type !== 'kicker' && f.type !== 'table' && f.type !== 'climb') continue;
+    let popAt = null;
+    for (let d = 120; d >= 0; d -= 1) {
+      probe.pos.z = f.z + d;
+      if (cue.update(0.016, probe, null).stage === 'pop') { popAt = d; break; }
+    }
+    lips.push({ f, popAt });
+  }
+  const bad = lips.filter((l) => l.popAt === null || l.popAt > 12);
+  check('the RELEASE call lands within 12 m of the lip', bad.length === 0,
+    bad.length ? bad.map((l) => `${l.f.type}@${l.f.z}:${l.popAt}`).join(', ')
+      : `${lips.length} lips, worst ${Math.max(...lips.map((l) => l.popAt))} m`);
 }
 
 // 7. Reset must fully clear state.

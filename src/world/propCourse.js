@@ -390,9 +390,11 @@ export function emitCourse(sink, z0, z1, bucket) {
         const x = courseXAt(z) + f.off + side * f.w;
         const p = V(x, heightAt(x, z), z);
         if (prev) {
-          // Alternating red/white, the same language as the course walls.
-          const col = Math.round(-z / STEP) % 2 ? 0xd8321f : 0xf2f4f8;
-          out.matte.push(paint(slab(prev, p, 0.55, 0.30), col));
+          // Steel, deliberately NOT the red/white of the course walls. The
+          // barrier runs parallel a few metres further out, and two red-and-
+          // white lines side by side read as one noisy double barrier rather
+          // than as a pipe with a lip you can aim for.
+          out.matte.push(paint(slab(prev, p, 0.55, 0.30), 0x9aa6b4));
         }
         prev = p;
       }

@@ -17,7 +17,8 @@ import { courseFeatures, heightAt } from '../world/terrain.js';
  */
 
 const JUMPS = courseFeatures()
-  .filter((f) => f.type === 'kicker' || f.type === 'table' || f.type === 'hip')
+  .filter((f) => f.type === 'kicker' || f.type === 'table' || f.type === 'hip'
+    || f.type === 'climb')
   .sort((a, b) => b.z - a.z);
 
 /** Distance from z to the next takeoff lip ahead, in metres. */
@@ -27,6 +28,16 @@ function toNextLip(z) {
     if (f.z < z - 2) return { dist: z - f.z, feature: f };
   }
   return { dist: Infinity, feature: null };
+}
+
+/** The pipe sections, as [zEnter, zExit] spans. */
+const PIPES = courseFeatures()
+  .filter((f) => f.type === 'pipe')
+  .map((f) => [f.z + f.len, f.z - f.len]);
+
+function inPipe(z) {
+  for (const [a, b] of PIPES) if (z <= a && z >= b) return true;
+  return false;
 }
 
 const APPROACH = 85;   // start telling them a jump is coming
@@ -82,12 +93,48 @@ export class Coach {
     }
 
     // ---- on the ground: is a jump coming? ---------------------------------
-    const { dist } = toNextLip(body.pos.z);
+    const { dist, feature } = toNextLip(body.pos.z);
 
-    if (dist > APPROACH) {
+    // The pipe is ridden, not hit, so it gets its own instruction for as long
+    // as the rider is inside it. Without this the section is silent — there is
+    // no lip to count down to — and a player has no way to learn that the walls
+    // are the point.
+    if (inPipe(body.pos.z)) {
+      c.stage = 'pipe';
+      c.title = 'RIDE THE WALLS';
+      c.sub = 'carve up the transition and pop off the coping';
+      return c;
+    }
+
+    // A climb is a long approach you have to arrive at with speed, so the
+    // warning has to come before the hill starts, not 85 m from its lip —
+    // by then you are already halfway up it and it is too late to tuck.
+    const isClimb = feature?.type === 'climb';
+    const run = isClimb ? (feature.run || feature.len * 3.5) : 0;
+    const approach = isClimb ? run + 40 : APPROACH;
+
+    if (dist > approach) {
       c.stage = 'none';
       c.title = '';
       c.sub = '';
+      return c;
+    }
+
+    if (isClimb) {
+      if (dist > POP) {
+        c.stage = 'climb';
+        c.title = dist > run * 0.4 ? 'CLIMB AHEAD' : 'HOLD  SPACE';
+        c.sub = dist > run * 0.4
+          ? 'tuck — carry every bit of speed up it'
+          : 'charge the ollie for the top';
+        c.meter = 1 - (dist - POP) / (approach - POP);
+        return c;
+      }
+      c.stage = 'pop';
+      c.title = 'RELEASE!';
+      c.sub = 'huge air — pick a spin and commit';
+      c.meter = 1;
+      c.urgent = true;
       return c;
     }
 

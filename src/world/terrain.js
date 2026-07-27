@@ -179,7 +179,7 @@ const FEATURES = [
   { type: 'kicker',  z: -3380, h: 12,   len: 36, off: 4,   w: 24 },
   { type: 'drop',    z: -3620, h: 19,   len: 30, off: 0,   w: 38 },
   // The pipe. 230 m of wall-to-wall riding rather than a single hit.
-  { type: 'pipe',    z: -3960, h: 9.5,  len: 115, off: 0,  w: 21, flat: 9 },
+  { type: 'pipe',    z: -3960, h: 8.5,  len: 115, off: 0,  w: 22, flat: 11 },
 
   // --- section 5: the money jump, then a technical stretch ----------------
   { type: 'table',   z: -4300, h: 13,   len: 40, off: 0,   w: 28, gap: 70 },
@@ -206,24 +206,50 @@ function lateralFalloff(dx, w) {
  *
  *   0 .. flat        the flat bottom
  *   flat .. wall     quarter-circle transition, vertical at the coping
- *   wall .. +DECK    the deck you land back onto
+ *   wall .. +deck    the deck you land back onto
  *   then             blended out into the mountain
  *
  * Written out rather than reusing lateralFalloff because a pipe is the one
  * feature whose height is *maximal* at its lateral edge, so the usual
  * centre-weighted falloff would scale the walls down to nothing.
+ *
+ * The deck is deliberately short. Feature height is SUMMED on top of the base
+ * course surface, and the base surface already puts a 9.5 m berm at the edge
+ * of the piste — so a wide pipe deck lands on top of that berm and the two
+ * stack into a single ~18 m wall with the padded barrier perched on its crest.
+ * Keeping the coping inside the piste and the deck narrow makes the pipe wall
+ * flow into the berm instead of climbing it.
  */
-const PIPE_DECK = 9, PIPE_BLEND = 20;
-function pipeProfile(adx, flat, wall) {
+function pipeProfile(adx, flat, wall, deck, blend) {
   if (adx <= flat) return 0;
-  if (adx >= wall + PIPE_DECK + PIPE_BLEND) return 0;
-  if (adx >= wall + PIPE_DECK) {
-    const t = (adx - wall - PIPE_DECK) / PIPE_BLEND;
+  if (adx >= wall + deck + blend) return 0;
+  if (adx >= wall + deck) {
+    const t = (adx - wall - deck) / blend;
     return 1 - t * t * (3 - 2 * t);
   }
   if (adx >= wall) return 1;
   const u = (adx - flat) / Math.max(1, wall - flat);
-  return 1 - Math.sqrt(Math.max(0, 1 - u * u));
+  return pipeTransition(u);
+}
+
+// Quarter-circle transition with a straight top.
+//
+// A pure quarter-circle is the right shape for the bottom of the wall — nearly
+// flat where it meets the floor, so a rider can carry into it without catching
+// an edge — but its tangent goes vertical at the coping, and a vertical face is
+// not something the ground constraint can resolve: riders arrive at it sideways
+// at 60 m/s and get stopped dead. The circle is therefore followed to U0 and
+// continued along its own tangent from there, then renormalised so the wall
+// still reaches full height exactly at the coping. Steepest grade ~68deg.
+const PIPE_U0 = 0.88;
+const PIPE_V0 = 1 - Math.sqrt(1 - PIPE_U0 * PIPE_U0);
+const PIPE_M = PIPE_U0 / Math.sqrt(1 - PIPE_U0 * PIPE_U0);
+const PIPE_NORM = PIPE_V0 + PIPE_M * (1 - PIPE_U0);
+function pipeTransition(u) {
+  const v = u <= PIPE_U0
+    ? 1 - Math.sqrt(Math.max(0, 1 - u * u))
+    : PIPE_V0 + PIPE_M * (u - PIPE_U0);
+  return v / PIPE_NORM;
 }
 
 /** Total displacement from authored features at (x, z). */
@@ -240,7 +266,7 @@ function featureHeight(x, z, cx) {
     // extreme rather than at its centre: the walls ARE the feature. Cutting it
     // off at f.w would leave a vertical metre-high step at the coping, so the
     // gate is widened and the deck is carried out by the case itself.
-    const gateW = f.type === 'pipe' ? f.w + PIPE_DECK + PIPE_BLEND : f.w;
+    const gateW = f.type === 'pipe' ? f.w + (f.deck ?? 2) + (f.blend ?? 10) : f.w;
     const lat = lateralFalloff(dx, gateW);
     if (lat <= 0) continue;
 
@@ -343,7 +369,8 @@ function featureHeight(x, z, cx) {
         // rider hits a metre-high step sideways at the entrance.
         const ends = THREE.MathUtils.clamp((f.len - Math.abs(s)) / 40, 0, 1);
         const along = ends * ends * (3 - 2 * ends);
-        d += f.h * along * pipeProfile(Math.abs(dx), f.flat ?? f.w * 0.42, f.w);
+        d += f.h * along * pipeProfile(Math.abs(dx), f.flat ?? f.w * 0.42, f.w,
+          f.deck ?? 2, f.blend ?? 10);
         break;
       }
     }
