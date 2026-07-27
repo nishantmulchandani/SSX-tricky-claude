@@ -4,6 +4,7 @@ import { Input } from './core/input.js';
 import { ChaseCamera } from './core/camera.js';
 import { GameState } from './core/gameState.js';
 import { Mountain } from './world/mountain.js';
+import { courseXAt } from './world/terrain.js';
 import { createSky } from './world/sky.js';
 import { createProps } from './world/props.js';
 import { BoardPhysics } from './physics/board.js';
@@ -106,4 +107,4 @@ engine.add(game);
 engine.start();
 
 // Debug handle for tools/shot.mjs and tools/probe.mjs.
-globalThis.__game = { engine, body, chase, mountain, sky, input, rider, vfx, tricks, props, hud, post, audio, run, THREE };
+globalThis.__game = { __courseX: courseXAt, engine, body, chase, mountain, sky, input, rider, vfx, tricks, props, hud, post, audio, run, THREE };

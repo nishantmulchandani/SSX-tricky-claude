@@ -14,8 +14,22 @@ export CHROME_PATH=/opt/pw-browsers/chromium-1194/chrome-linux/chrome
 
 node tools/ridetest.mjs           # course rideability   -> PASS
 node tools/tricktest.mjs          # trick system         -> PASS (13/13)
+node tools/smoke.mjs --seconds 6  # end-to-end in-browser -> PASS
 node tools/shot.mjs --out shots/check.png --z -1400 --wait 6 --w 1280 --h 720
 ```
+
+`smoke.mjs` is the one that catches what the others cannot: a module that
+parses but blanks the screen at runtime (shader that will not compile, a
+temporal-dead-zone reference, a missing uniform). Run it before every commit.
+
+Two things about this environment that will mislead you if you do not know them:
+- Rendering is **software** (swiftshader). The full post stack runs at well
+  under 1 fps. That is not a performance bug, and no frame-rate number measured
+  here says anything about a real GPU.
+- `renderer.info.render` resets on every `render()` call, and the post stack
+  ends on a fullscreen quad — so reading it after a frame reports "1 call, 1
+  triangle". `smoke.mjs` renders the scene once directly to get the real
+  figure. Current baseline: **9 draw calls, 151,808 triangles** (no props yet).
 `shot.mjs` prints a `=== PAGE ERRORS ===` section. Pipe through `strings` when
 the output looks binary. Any `ERROR: 0:` line is a shader compile failure.
 
