@@ -83,10 +83,21 @@ export class Coach {
         c.title = 'LET GO';
         c.sub = 'centre the board to land it';
         c.urgent = true;
+      } else if (tricks?.tricky && !tricks.uber) {
+        // A full meter is the one moment the player has an option they will
+        // never discover on their own, and it is worth more than any grab.
+        // The bar says IT'S TRICKY; this says what to actually do about it.
+        c.stage = 'uber';
+        c.title = 'PRESS  U';
+        c.sub = 'uber trick — the meter is full';
+        c.meter = Math.min(1, body.airTime / 2.2);
+        c.urgent = true;
       } else {
         c.stage = 'air';
-        c.title = 'SPIN  A / D';
-        c.sub = 'J K L I to grab  ·  hold for more points';
+        c.title = tricks?.uber ? 'HOLD IT' : 'SPIN  A / D';
+        c.sub = tricks?.uber
+          ? `${tricks.uber.name} — ride it out`
+          : 'J K L I to grab  ·  hold for more points';
         c.meter = Math.min(1, body.airTime / 2.2);
       }
       return c;

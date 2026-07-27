@@ -107,7 +107,12 @@ async function main() {
         g.race.player.controller = new AI({ skill: 0.95, seed: 7, lane: 0 });
       }
 
-      const steps = Math.round((s.settle ?? 2.2) / DT);
+      // 2.2s was not enough. A capture drops the rider onto the course from a
+      // standing reset, and the AI needs a few seconds to gather the line — so
+      // frame after frame showed it still drifting out towards the barrier,
+      // with the camera half inside a padded wall panel. That is a picture of
+      // the capture harness, not of the game. 5s gets it onto the racing line.
+      const steps = Math.round((s.settle ?? 5.0) / DT);
       for (let i = 0; i < steps; i++) {
         if (s.steer !== undefined) {
           g.input.actions.right = s.steer > 0;
