@@ -43,11 +43,11 @@ export class RemoteController {
 }
 
 const FIELD = [
-  { id: 'ai-1', name: 'KAZ',    skill: 0.92, lane: -0.55, palette: { jacket: '#2f6ad8', jacketDark: '#17356e', accent: '#e8f0ff' } },
-  { id: 'ai-2', name: 'MERCY',  skill: 0.84, lane: 0.5,   palette: { jacket: '#28c07a', jacketDark: '#12613c', accent: '#eafff4' } },
+  { id: 'ai-1', name: 'KAZ',    skill: 0.92, lane: -0.5, palette: { jacket: '#2f6ad8', jacketDark: '#17356e', accent: '#e8f0ff' } },
+  { id: 'ai-2', name: 'MERCY',  skill: 0.84, lane: 0.45,   palette: { jacket: '#28c07a', jacketDark: '#12613c', accent: '#eafff4' } },
   { id: 'ai-3', name: 'VOSS',   skill: 0.76, lane: -0.2,  palette: { jacket: '#f0a92b', jacketDark: '#8a5c10', accent: '#fff6e2' } },
   { id: 'ai-4', name: 'RIKO',   skill: 0.68, lane: 0.25,  palette: { jacket: '#a44bd8', jacketDark: '#54216f', accent: '#f6e9ff' } },
-  { id: 'ai-5', name: 'BRICK',  skill: 0.6,  lane: 0.75,  palette: { jacket: '#d8d4cc', jacketDark: '#6d6a63', accent: '#2b2f3a' } },
+  { id: 'ai-5', name: 'BRICK',  skill: 0.6,  lane: 0.6,  palette: { jacket: '#d8d4cc', jacketDark: '#6d6a63', accent: '#2b2f3a' } },
 ];
 
 export class Race {

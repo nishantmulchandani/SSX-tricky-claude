@@ -27,8 +27,21 @@ export const COURSE_START_Y = 1750;
 // tens of seconds, and a velocity spring got eaten by edge grip, so they
 // drifted out and stayed out. The terrain already solves this; the padded wall
 // is drawn at the crest purely as the visual full stop.
-export const BERM_H = 11;
-export const BERM_RUN = 16;
+// Steep and close, so the run reads as a walled channel.
+//
+// The U-shaped cross-section in the reference courses comes from the padded
+// walls rising sharply at the edge of the piste, NOT from the snow itself
+// curving. Curving the snow was tried and is strictly worse: any visible
+// amount puts the racing line on a cross-slope, riders oscillate across the
+// channel like a marble in a bowl, and landings on the tilt bail. Keep the
+// piste flat and put the shape in the banks.
+export const BERM_H = 9.5;
+export const BERM_RUN = 9.0;
+
+// Half-pipe trough. TROUGH_H is the rise at the edge of the groomed ribbon;
+// the exponent keeps the racing line flat rather than curving all the way in.
+const TROUGH_H = 1.5;
+const TROUGH_POW = 3.6;
 
 /**
  * Lateral limit of the rideable course at a depth: the top of the berm, which
@@ -289,12 +302,31 @@ function courseSurface(x, z, p, cx, halfWidth, lod) {
   // at the edge meant narrowing the track turned every corner into a ~55deg
   // wall the rider slid down and stalled against. tan(22deg) ~= 0.40 at full
   // lock, scaled by the local half-width.
-  const bank = THREE.MathUtils.clamp(curvature * 1.6e4, -1, 1) * 0.40;
+  // tan(9deg). Banking must stay subtle: combined with the trough it tilts the
+  // whole channel, and at tan(22deg) the "flat" racing line sat on a 30 degree
+  // cross-slope that slid the rider sideways the entire way down the course.
+  const bank = THREE.MathUtils.clamp(curvature * 1.6e4, -1, 1) * 0.10;
   h += THREE.MathUtils.clamp(u, -1.2, 1.2) * halfWidth * bank;
 
-  // Gentle rollers down the fall line — rideable, pumpable, never a wall.
-  h += Math.sin(z * 0.017 + Math.sin(z * 0.0031) * 2.0) * 4.2;
-  h += Math.sin(z * 0.052 + x * 0.004) * 1.15;
+  // --- the trough ---------------------------------------------------------
+  // The course is a U-shaped channel, not a flat piste with something bolted
+  // on the side. The snow curves up from the racing line into the walls, so
+  // the run reads as a carved half-pipe you are held inside, you can ride the
+  // transition, and a bad line is gathered back towards the centre instead of
+  // wandering off. This single change is most of what makes the cross-section
+  // look like the reference courses.
+  //
+  // The exponent keeps the middle genuinely flat — a parabola all the way to
+  // the centre would leave no racing line to hold an edge on.
+  const au = Math.min(Math.abs(u), 1.35);
+  h += TROUGH_H * Math.pow(au, TROUGH_POW);
+
+  // --- vertical undulation ------------------------------------------------
+  // Rollers you climb and launch from, not just a monotonic slide downhill.
+  // These are what make the course breathe: compress in the hollow, pop off
+  // the crest, get air without needing a built kicker.
+  h += Math.sin(z * 0.0125 + Math.sin(z * 0.0027) * 2.0) * 7.0;
+  h += Math.sin(z * 0.043 + x * 0.004) * 1.6;
 
   // Snow surface texture, retired band by band as the sample spacing grows.
   // A 12cm wind ripple evaluated at a vertex 200m from its neighbour is pure
@@ -338,7 +370,11 @@ function relief(x, z, distFromCourse, halfWidth, lod) {
   const shoulder = smoothstep(BERM_RUN, BERM_RUN + 140, d);
   const far = smoothstep(BERM_RUN + 90, 900, d);
 
-  let r = berm;
+  // Immediately past the berm the ground kicks up hard. The berm alone is a
+  // 46deg bank riders can carry enough speed to launch clean over; this is the
+  // backstop that actually keeps the field inside the channel, and it is what
+  // the padded wall is drawn on top of.
+  let r = berm + smoothstep(BERM_RUN, BERM_RUN + 13, d) * 9;
   if (shoulder <= 0 && far <= 0) return r;
 
   const crest = Math.pow(THREE.MathUtils.clamp(ridged2(x * 0.00042, z * 0.00042, lod < 60 ? 5 : 3), 0, 1), 1.4);

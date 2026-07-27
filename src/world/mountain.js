@@ -127,7 +127,13 @@ export class Mountain {
     //
     // Work is additionally capped per call, so a frame can never be swamped;
     // the stalest rings are served first and the rest wait a frame or two.
-    let budget = this.vertexBudget;
+    // The very first build must complete in one go. The incremental budget
+    // spreads a full rebuild over a dozen frames, which is fine for streaming
+    // but catastrophic on frame one: every ring that has not been sampled yet
+    // still holds zero positions, so its normals come out zero, and the snow
+    // shader reads a zero normal as a vertical face and shades it as bare
+    // rock. That is what made 70% of the terrain render flat grey.
+    let budget = this._built ? this.vertexBudget : Infinity;
     let touched = false;
     let dirtyLo = rings, dirtyHi = -1;
 
@@ -163,7 +169,10 @@ export class Mountain {
     }
 
     if (!touched) return;
+    this._built = true;
     this._center.set(cx, 0, cz);
+    // Normals depend on the neighbouring rings' positions, so widen the dirty
+    // span by one on each side.
     this._dirtyLo = Math.max(0, dirtyLo - 1);
     this._dirtyHi = Math.min(rings - 1, dirtyHi + 1);
 

@@ -56,7 +56,11 @@ export const FEEL = {
   // In-air angular dynamics
   SPIN_ACCEL: 1.15,            // rev/s^2 pushing the way you already spin
   SPIN_DECEL: 1.55,            // rev/s^2 fighting your own momentum
-  SPIN_DAMP: 0.10,             // rev/s^2 passive — near zero on purpose
+  // Releasing the stick has to actually slow the rotation. At 0.10 the spin
+  // was essentially frictionless, so letting go did nothing and the rider
+  // arrived at the snow still turning at over a revolution a second — which
+  // bails, every time, no matter how well the jump was set up.
+  SPIN_DAMP: 0.85,             // rev/s^2 passive
   SPIN_MAX: 2.60,
   SPIN_MAX_TUCKED: 3.30,
   TUCK_SPINUP: 0.55,           // per second multiplicative, arms-in
@@ -71,12 +75,18 @@ export const FEEL = {
 
   // Landing
   CHECKOUT_TIME: 0.30,         // spotting the landing: rotation settles
-  CHECKOUT_DAMP: 3.5,
-  ASSIST_DEG: 22,              // total yaw the checkout may steal for you
-  ASSIST_DEG_UBER: 60,
-  PERFECT_ERR: 14,
-  CLEAN_ERR: 34,
-  SLOPPY_ERR: 62,
+  CHECKOUT_DAMP: 5.5,
+  // Landing assist. This is the single biggest difference between a trick
+  // system that feels generous and one that feels impossible: the game quietly
+  // rotates you towards the nearest clean landing as you drop in. At 22 degrees
+  // it was nowhere near enough to rescue a normal jump, so essentially nothing
+  // could be landed and the game read as having no tricks at all.
+  ASSIST_DEG: 62,              // total yaw the checkout may steal for you
+  ASSIST_DEG_UBER: 110,
+  CHECKOUT_TIME_ASSIST: 0.45,
+  PERFECT_ERR: 18,
+  CLEAN_ERR: 46,
+  SLOPPY_ERR: 84,
   INVERT_PITCH: 72,
   INVERT_ROLL: 78,
   TUCK_FLICK_GRACE: 0.18,      // pitch held under this long still reads as a flick

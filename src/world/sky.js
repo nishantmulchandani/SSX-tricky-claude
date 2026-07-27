@@ -55,13 +55,22 @@ const DEFAULTS = {
   // Raised from 23deg. A low sun gives a dark, moody zenith; the reference look
   // is a bright high-alpine midday with a vivid blue sky. Still low enough to
   // rake real shadows across the piste.
-  sunElevation: 38.0,
+  // High. The course now sits in a walled channel, and the containment behind
+  // the berm is tall enough that a 38deg sun threw a ~45m shadow straight
+  // across the racing line — the whole track floor rendered flat grey. A high
+  // sun keeps the channel lit, which is also how the reference courses read.
+  sunElevation: 56.0,
   // Measured from the fall line (-Z) towards +X: the sun sits ahead and to the
   // right, so the run is cross-lit and back-lit and the shadows rake across it.
   sunAzimuth: 36.0,
 
   /** Top-of-atmosphere solar irradiance expressed in render units. */
-  exposure: 5.1,
+  // Re-tuned after the terrain normals were fixed. The whole grade had been
+  // calibrated against a bug: 70% of the mesh had zero normals and was lit by
+  // ambient alone, so the scene looked correctly exposed only because most of
+  // it was wrongly dark. With the sun actually reaching the snow, this had to
+  // come down by a third.
+  exposure: 3.1,
   /** Aerosol load. 1 = molecular only (unphysically clean), 3-4 = hazy valley.
    *  High alpine air really is close to pristine, and the deep blue that comes
    *  with it is most of what says "3000 m" before any geometry does. */

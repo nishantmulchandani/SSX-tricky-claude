@@ -21,11 +21,11 @@ function check(name, cond, detail = '') {
 }
 
 const FIELD = [
-  { name: 'KAZ', skill: 0.92, lane: -0.55 },
-  { name: 'MERCY', skill: 0.84, lane: 0.5 },
+  { name: 'KAZ', skill: 0.92, lane: -0.5 },
+  { name: 'MERCY', skill: 0.84, lane: 0.45 },
   { name: 'VOSS', skill: 0.76, lane: -0.2 },
   { name: 'RIKO', skill: 0.68, lane: 0.25 },
-  { name: 'BRICK', skill: 0.6, lane: 0.75 },
+  { name: 'BRICK', skill: 0.6, lane: 0.6 },
 ];
 
 const racers = FIELD.map((f, i) => new Racer({

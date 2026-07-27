@@ -64,7 +64,10 @@ export class AIController {
     const ahead = Math.min(90, 22 + b.speed * 0.9);
     const targetZ = z - ahead;
     const wander = Math.sin(this._t * 0.5 + this._wanderPhase) * (1 - this.skill) * 0.35;
-    const laneOff = (this.lane + wander) * half * 0.42;
+    // Lanes are a fraction of the *racing line*, not of the whole channel. At
+    // 0.42 the outermost AI sat on the bank for most of the run once the berm
+    // was narrowed, scoring nothing because it never got a clean takeoff.
+    const laneOff = (this.lane + wander) * half * 0.26;
     const targetX = courseXAt(targetZ) + laneOff;
 
     // Steer towards it, in the frame of where the board is actually pointing.

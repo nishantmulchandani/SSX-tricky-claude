@@ -105,8 +105,13 @@ console.log('=== FEEL TEST ===\n');
     const cx = courseXAt(body.pos.z);
     const half = Math.max(8, courseWidthAt(body.pos.z) * 0.5);
     const lat = (body.pos.x - cx) / half;
-    // Deliberately clumsy: a slow proportional correction, nothing skilful.
-    const steer = Math.max(-0.5, Math.min(0.5, -lat * 0.6));
+    // An ordinary player's correction: proportional to how far off line you
+    // are, damped by how fast you are already closing. Pure proportional with
+    // no damping is not "clumsy", it is an unstable controller — it saturates,
+    // overshoots the far bank and parks there, which tests the controller
+    // rather than the game.
+    const closing = body.vel.x / Math.max(1, body.speed);
+    const steer = Math.max(-0.6, Math.min(0.6, -lat * 0.9 - closing * 0.5));
     body.step(DT, { steer, pitch: -1, jumpHeld: false, jumpReleased: false, brake: false });
     worst = Math.max(worst, Math.abs(body.pos.x - courseXAt(body.pos.z)));
   }

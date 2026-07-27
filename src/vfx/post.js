@@ -88,7 +88,11 @@ export function createPostStack(engine, { sky } = {}) {
     strength: 0.32,
     farRange: 1400,   // metres before the far blur reaches full strength
     farScale: 0.55,
-    nearScale: 0.30,
+    // Near blur essentially off. The ground directly under the camera is only
+    // a couple of metres away, so any meaningful near CoC smears the whole
+    // bottom of the frame into a grey wash and throws away the snow detail
+    // that the shader works hardest on.
+    nearScale: 0.04,
   });
   composer.addPass(dof);
 
