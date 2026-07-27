@@ -24,7 +24,7 @@
  */
 
 import { el, clamp, comma, clock, kineticText, streamText, replay, pulse } from './dom.js';
-import { COURSE_LENGTH, progressAt } from '../world/terrain.js';
+import { COURSE_LENGTH, progressAt, CHECKPOINTS } from '../world/terrain.js';
 
 const MAX_KMH = 260;         // dial range; the physics soft cap is ~238 km/h
 const SWEEP = 244;           // degrees of needle travel
@@ -70,11 +70,13 @@ export class HUD {
       boost: -1, full: null, prog: -1, dist: -1, clockStr: '',
       air: null, airT: '', airDeg: '', crashed: false, grind: null, bal: -999,
       current: '', state: '', fit: -1, qtime: -1, count: -99,
+      splitIdx: undefined,
     };
     this._evT = -1;
     this._lastTrick = null;
     this._banner = 0;
     this._ghost = 0;
+    this._splitHold = 0;
     this._rows = 0;
     this._clearGen = 0;
 
@@ -105,11 +107,25 @@ export class HUD {
     el('div', 'lbl prog__cap prog__cap--top', prog, 'DROP');
     const track = el('div', 'prog__track', prog);
     this.elProgFill = el('div', 'prog__fill', track);
-    for (let i = 1; i < 4; i++) el('div', 'prog__gate', track).style.top = (i * 25) + '%';
+    // Tick marks at the REAL checkpoint depths, not at fixed quarters — the
+    // rail is supposed to tell you how far to the next gantry, and evenly
+    // spaced marks that do not line up with the arches you ride under are
+    // worse than none.
+    for (const z of CHECKPOINTS) {
+      el('div', 'prog__gate', track).style.top = (progressAt(z) * 100).toFixed(2) + '%';
+    }
     this.elProgMark = el('div', 'prog__mark', track);
     el('div', 'prog__chev', this.elProgMark);
     this.elDist = el('div', 'prog__dist', this.elProgMark, '0 m');
     el('div', 'lbl prog__cap prog__cap--bot', prog, 'BASE');
+
+    // Split readout, alongside the progress rail — the checkpoint ticks are on
+    // that rail, so the split belongs next to them. It cannot go under the
+    // clock: the trick column is bottom-anchored and grows upward into that
+    // space, so a long combo would bury the split completely.
+    this.elSplit = el('div', 'split', hud);
+    this.elSplitName = el('div', 'split__name', this.elSplit, '');
+    this.elSplitDelta = el('div', 'split__delta', this.elSplit, '');
 
     // ── trick coach, centre ──────────────────────────────────────────────
     // Sits below the trick banner so the two never collide.
@@ -278,6 +294,9 @@ export class HUD {
     this.elList.textContent = '';
     this._rows = 0;
     this._banner = 0; this._ghost = 0;
+    this._splitHold = 0;
+    this._c.splitIdx = undefined;
+    this.elSplit.classList.remove('is-on');
     this.elBanner.classList.remove('is-on');
     this.elGhost.classList.remove('is-on');
     this._c.current = '';
@@ -385,6 +404,7 @@ export class HUD {
     this._airline(body, tricks);
     this._crash(body);
     this._clock();
+    this._split(dt, run);
     this._live(tricks);
     this._race(race);
     this._coach(dt, body, tricks);
@@ -722,6 +742,41 @@ export class HUD {
     c.qtime = q;
     const s = clock(q);
     if (s !== c.clockStr) { c.clockStr = s; this.elClock.textContent = s; }
+  }
+
+  // ── checkpoint splits ────────────────────────────────────────────────────
+  /**
+   * Flashes the split time as each gantry goes by, with the delta against the
+   * fastest run of the session. A checkpoint arch that does not stop a clock is
+   * just scenery, and the delta is the only part a racer actually reads.
+   */
+  _split(dt, run) {
+    const c = this._c;
+    const s = run?.lastSplit;
+    if (s && s.index !== c.splitIdx) {
+      c.splitIdx = s.index;
+      this._splitHold = 3.4;
+      this.elSplitName.textContent = `CP ${s.index + 1}   ${clock(s.time)}`;
+      if (s.delta == null) {
+        this.elSplitDelta.textContent = '';
+        this.elSplit.classList.remove('is-up', 'is-down');
+      } else {
+        const up = s.delta < 0;   // negative delta = ahead of the best run
+        this.elSplitDelta.textContent = (up ? '−' : '+') + Math.abs(s.delta).toFixed(2);
+        this.elSplit.classList.toggle('is-up', up);
+        this.elSplit.classList.toggle('is-down', !up);
+      }
+      this.elSplit.classList.add('is-on');
+      replay(this.elSplit);
+    }
+    if (this._splitHold > 0 && (this._splitHold -= dt) <= 0) {
+      this.elSplit.classList.remove('is-on');
+    }
+    // A new run rewinds the clock; drop the stale split with it.
+    if (!s && c.splitIdx !== undefined) {
+      c.splitIdx = undefined;
+      this.elSplit.classList.remove('is-on');
+    }
   }
 
   // ── live trick name ──────────────────────────────────────────────────────

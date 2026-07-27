@@ -23,6 +23,7 @@ export const GradeShader = {
     uVignette: { value: 0.42 },
     uGrain: { value: 0.022 },
     uContrast: { value: 1.075 },
+    uShoulder: { value: 0.80 },     // where the highlight roll-off begins
     uSaturation: { value: 1.06 },
     uShadowTint: { value: null },
     uHighlightTint: { value: null },
@@ -34,7 +35,7 @@ export const GradeShader = {
     uniform sampler2D tDiffuse;
     uniform vec2 uResolution;
     uniform float uTime, uRush, uAberration, uDistort, uVignette, uGrain;
-    uniform float uContrast, uSaturation, uExposure;
+    uniform float uContrast, uSaturation, uExposure, uShoulder;
     uniform vec3 uShadowTint, uHighlightTint, uLift;
     varying vec2 vUv;
     ${LUMA}
@@ -78,6 +79,22 @@ export const GradeShader = {
       float l2 = luma(col);
       float satMask = 1.0 - smoothstep(0.55, 1.0, l2);
       col = mix(vec3(l2), col, mix(1.0, uSaturation, satMask));
+
+      // --- highlight shoulder -----------------------------------------------
+      // Everything above uses a contrast expansion around a low pivot, which
+      // pushes sunlit snow past 1.0 and the final clamp then flattens it into
+      // paper white. Roughly a fifth of a typical frame was landing there, so
+      // the corduroy, sastrugi and wind polish the snow shader computes were
+      // being thrown away over the brightest — and largest — part of the image.
+      //
+      // This is an exponential shoulder: below uShoulder nothing is touched at
+      // all, and above it the response rolls off asymptotically towards 1.0 and
+      // never reaches it. Two values that both used to clamp to pure white now
+      // land on two different greys, which is the whole point — the snow keeps
+      // its modelling and the frame keeps its brightness.
+      vec3 over = max(col - uShoulder, 0.0);
+      float range = max(1.0 - uShoulder, 1e-4);
+      col = min(col, uShoulder) + range * (1.0 - exp(-over / range));
 
       // --- vignette ---------------------------------------------------------
       float vig = 1.0 - uVignette * pow(clamp(r2 * 2.0, 0.0, 1.0), 1.35);

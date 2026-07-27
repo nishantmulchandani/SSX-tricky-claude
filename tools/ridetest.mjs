@@ -92,7 +92,13 @@ let bad = 0;
 for (const f of courseFeatures()) {
   const cx = courseXAt(f.z);
   let steepest = 0, at = 0;
-  for (let s = -20; s <= f.len + 20; s += 0.5) {
+  // Scan the feature's WHOLE support, not just its `len`. A climb's ramp is
+  // `run` metres long and a table's landing sits `gap` past its lip — scanning
+  // a fixed window around `len` would let the steep part fall outside it and
+  // report a clean 0 degrees for a wall the rider is about to hit.
+  const back = 20 + (f.gap || 0) + (f.land || 0);
+  const fwd = 20 + Math.max(f.len, f.run || 0);
+  for (let s = -back; s <= fwd; s += 0.5) {
     const z = f.z + s;
     const g = (heightAt(cx + (f.off || 0), z - 0.5) - heightAt(cx + (f.off || 0), z + 0.5)) / 1.0;
     // Positive g = ground rising as the rider advances (into the hill).

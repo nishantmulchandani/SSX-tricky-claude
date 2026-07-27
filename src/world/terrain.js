@@ -143,6 +143,14 @@ export function progressAt(z) {
  *   roller  — rideable bump you can pump or pop off.
  *   drop    — a step down; the run simply falls away.
  *   hip     — an angled takeoff that throws you across the fall line.
+ *   climb   — a long uphill grade that rises well above the fall line and
+ *             crests into a launch. The point is the *climb*: you feel the
+ *             mountain pitch up against you, trade 40 m/s of speed for height,
+ *             and get thrown off the top with real hang time. A kicker is a
+ *             ramp you hit; this is a hill you have to carry speed up.
+ *   pipe    — a sustained half-pipe: transitions rising off BOTH edges over a
+ *             long z-run, so the whole section is ridden wall to wall rather
+ *             than as a single hit. `quarter` is one wall; this is the pipe.
  */
 const FEATURES = [
   // --- section 1: warm-up. Read the line, find the rhythm. ----------------
@@ -157,29 +165,34 @@ const FEATURES = [
   { type: 'kicker',  z: -1600, h: 9.0,  len: 32, off: -4,  w: 22 },
   { type: 'drop',    z: -1860, h: 12,   len: 26, off: 0,   w: 34 },
 
-  // --- section 3: rhythm run. Three hits in quick succession. -------------
+  // --- section 3: rhythm run, then the first up-climb ---------------------
   { type: 'roller',  z: -2060, h: 4.4,  len: 38, off: 4,   w: 24 },
   { type: 'roller',  z: -2160, h: 4.8,  len: 36, off: -3,  w: 24 },
   { type: 'hip',     z: -2340, h: 10,   len: 34, off: -7,  w: 22, side: -1 },
-  { type: 'table',   z: -2640, h: 11,   len: 38, off: 0,   w: 26, gap: 56 },
+  // The mountain pitches back UP against the rider for 150 m and throws them
+  // off the top. Placed straight after the hip so they arrive carrying speed.
+  { type: 'climb',   z: -2560, h: 31,   len: 30, off: 0,   w: 30, run: 130, land: 72 },
+  { type: 'table',   z: -2860, h: 11,   len: 38, off: 0,   w: 26, gap: 56 },
 
   // --- section 4: the steep. Big, committing features. --------------------
-  { type: 'quarter', z: -2960, h: 12,   len: 78, off: -14, w: 15, side: -1 },
-  { type: 'kicker',  z: -3240, h: 12,   len: 36, off: 4,   w: 24 },
-  { type: 'drop',    z: -3500, h: 19,   len: 30, off: 0,   w: 38 },
-  { type: 'roller',  z: -3740, h: 4.8,  len: 44, off: -6,  w: 26 },
+  { type: 'quarter', z: -3120, h: 12,   len: 78, off: -14, w: 15, side: -1 },
+  { type: 'kicker',  z: -3380, h: 12,   len: 36, off: 4,   w: 24 },
+  { type: 'drop',    z: -3620, h: 19,   len: 30, off: 0,   w: 38 },
+  // The pipe. 230 m of wall-to-wall riding rather than a single hit.
+  { type: 'pipe',    z: -3960, h: 9.5,  len: 115, off: 0,  w: 21, flat: 9 },
 
   // --- section 5: the money jump, then a technical stretch ----------------
-  { type: 'table',   z: -4000, h: 13,   len: 40, off: 0,   w: 28, gap: 70 },
-  { type: 'hip',     z: -4320, h: 11,   len: 36, off: 8,   w: 22, side: 1 },
-  { type: 'quarter', z: -4620, h: 11,   len: 74, off: 14,  w: 15, side: 1 },
-  { type: 'kicker',  z: -4900, h: 13,   len: 38, off: -5,  w: 24 },
+  { type: 'table',   z: -4300, h: 13,   len: 40, off: 0,   w: 28, gap: 70 },
+  { type: 'hip',     z: -4560, h: 11,   len: 36, off: 8,   w: 22, side: 1 },
+  { type: 'quarter', z: -4800, h: 11,   len: 74, off: 14,  w: 15, side: 1 },
+  // The big one: 210 m of climb, the highest launch on the course.
+  { type: 'climb',   z: -5080, h: 34,   len: 34, off: 0,   w: 32, run: 115, land: 66 },
 
   // --- section 6: run to the line. Fast, flowing, one last hit. -----------
-  { type: 'roller',  z: -5160, h: 4.0,  len: 44, off: 0,   w: 28 },
-  { type: 'table',   z: -5400, h: 14,   len: 42, off: 3,   w: 28, gap: 78 },
-  { type: 'kicker',  z: -5740, h: 10,   len: 34, off: -4,  w: 24 },
-  { type: 'roller',  z: -6000, h: 2.6,  len: 48, off: 0,   w: 30 },
+  { type: 'roller',  z: -5460, h: 4.0,  len: 44, off: 0,   w: 28 },
+  { type: 'table',   z: -5660, h: 14,   len: 42, off: 3,   w: 28, gap: 78 },
+  { type: 'kicker',  z: -5900, h: 10,   len: 34, off: -4,  w: 24 },
+  { type: 'roller',  z: -6080, h: 2.6,  len: 48, off: 0,   w: 30 },
 ];
 
 /** Smooth 0..1 lateral falloff so features blend into the piste at their edges. */
@@ -188,17 +201,47 @@ function lateralFalloff(dx, w) {
   return t * t * (3 - 2 * t);
 }
 
+/**
+ * Half-pipe cross-section as a fraction of wall height, from the centre out.
+ *
+ *   0 .. flat        the flat bottom
+ *   flat .. wall     quarter-circle transition, vertical at the coping
+ *   wall .. +DECK    the deck you land back onto
+ *   then             blended out into the mountain
+ *
+ * Written out rather than reusing lateralFalloff because a pipe is the one
+ * feature whose height is *maximal* at its lateral edge, so the usual
+ * centre-weighted falloff would scale the walls down to nothing.
+ */
+const PIPE_DECK = 9, PIPE_BLEND = 20;
+function pipeProfile(adx, flat, wall) {
+  if (adx <= flat) return 0;
+  if (adx >= wall + PIPE_DECK + PIPE_BLEND) return 0;
+  if (adx >= wall + PIPE_DECK) {
+    const t = (adx - wall - PIPE_DECK) / PIPE_BLEND;
+    return 1 - t * t * (3 - 2 * t);
+  }
+  if (adx >= wall) return 1;
+  const u = (adx - flat) / Math.max(1, wall - flat);
+  return 1 - Math.sqrt(Math.max(0, 1 - u * u));
+}
+
 /** Total displacement from authored features at (x, z). */
 function featureHeight(x, z, cx) {
   let d = 0;
   for (let i = 0; i < FEATURES.length; i++) {
     const f = FEATURES[i];
     const s = z - f.z;                    // >0 = uphill of the feature
-    const span = f.len + (f.gap || 0) + 60;
+    const span = f.len + (f.gap || 0) + (f.run || 0) + 60;
     if (s < -span || s > span) continue;  // compact support
 
     const dx = x - (cx + f.off);
-    const lat = lateralFalloff(dx, f.w);
+    // A pipe is the one feature whose displacement is largest at its lateral
+    // extreme rather than at its centre: the walls ARE the feature. Cutting it
+    // off at f.w would leave a vertical metre-high step at the coping, so the
+    // gate is widened and the deck is carried out by the case itself.
+    const gateW = f.type === 'pipe' ? f.w + PIPE_DECK + PIPE_BLEND : f.w;
+    const lat = lateralFalloff(dx, gateW);
     if (lat <= 0) continue;
 
     switch (f.type) {
@@ -252,6 +295,57 @@ function featureHeight(x, z, cx) {
         d += f.h * along * u * u * (3 - 2 * u);
         break;
       }
+      case 'climb': {
+        // The up-climb. Three parts, and the shape of each one matters:
+        //
+        //   approach [len .. run]  a long, gently steepening rise. Smootherstep
+        //                          rather than a straight grade so the transition
+        //                          at the bottom does not buck the board — the
+        //                          rider should feel gravity arrive, not a kerb.
+        //   crest    [len .. 0]    a short convex roll-over. Convex is what makes
+        //                          it launch: the surface curves away faster than
+        //                          the rider can follow, so they leave it.
+        //   landing  [0 .. -run]   the mountain falls back to the fall line at a
+        //                          steeper angle than it rose, so the landing is
+        //                          downhill-facing and the speed comes back.
+        const run = f.run || f.len * 3.5;               // length of the climb
+        const land = f.land || run * 0.55;              // length of the back side
+        if (s > run || s < -land) break;
+        let a;
+        if (s >= 0) {
+          // Rises to the lip on a power curve, NOT a smoothstep. A smoothstep
+          // flattens out at its top, and a crest that flattens is not a climb:
+          // the mountain here already falls at ~20 degrees, so a profile that
+          // levels off at the summit still leaves the rider going downhill and
+          // they roll straight over it. t^p keeps steepening all the way into
+          // the lip, so the last stretch genuinely points uphill — that is what
+          // makes it read as a climb and what throws the rider skyward.
+          // Slope at the lip is p*h/run, and it must beat the fall line.
+          const t = 1 - s / run;                       // 0 at the foot, 1 at the lip
+          a = Math.pow(t, f.pow || 2.2);
+        } else {
+          // The back side is short and steep where the climb was long: the
+          // ground drops out from under the rider far faster than they can
+          // fall. Cubic, so it rejoins the fall line with no kink at the base.
+          const t = -s / land;
+          a = (1 - t) * (1 - t) * (1 - t);
+        }
+        d += f.h * lat * a;
+        break;
+      }
+      case 'pipe': {
+        // Half-pipe. Both transitions, held for the whole length of the section
+        // so it reads as a pipe you ride rather than a bowl you fall into. The
+        // flat between the walls is `flat` metres wide; outside that the wall
+        // rises on a circular-ish transition to `h`.
+        if (Math.abs(s) > f.len) break;
+        // Ease the walls in and out at the ends of the section, otherwise the
+        // rider hits a metre-high step sideways at the entrance.
+        const ends = THREE.MathUtils.clamp((f.len - Math.abs(s)) / 40, 0, 1);
+        const along = ends * ends * (3 - 2 * ends);
+        d += f.h * along * pipeProfile(Math.abs(dx), f.flat ?? f.w * 0.42, f.w);
+        break;
+      }
     }
   }
   return d;
@@ -263,6 +357,19 @@ export function featureAt(x, z) {
 }
 
 export function courseFeatures() { return FEATURES; }
+
+/**
+ * Split gantries: where the checkpoint arches stand and where the run clock
+ * takes a split. Lives here, next to the features, because the two constraints
+ * are geometric — a gantry must not land on a takeoff ramp (its legs end up
+ * buried and its span ends up in your face) — and because the props layer and
+ * the run clock have to agree on where a checkpoint is or the arch you ride
+ * under is not the one that stops the split.
+ *
+ * Chosen on the boundaries between the six authored sections, each on a
+ * stretch with no feature within ~60 m.
+ */
+export const CHECKPOINTS = [-1240, -2760, -4160, -5560];
 
 // --- height field ---------------------------------------------------------
 

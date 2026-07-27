@@ -16,6 +16,7 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { heightAt } from './terrain.js';
 import { mulberry32 } from '../core/noise.js';
+import { ATLAS_COLS, ATLAS_ROWS } from '../shaders/propTextures.js';
 
 // --------------------------------------------------------------------------
 // attribute convention
@@ -50,8 +51,14 @@ export function waveByX(geo, fn) {
   return geo;
 }
 
-/** Assign a cell of the 4x6 sponsor atlas to a geometry's uvs. */
-export const ATLAS_COLS = 4, ATLAS_ROWS = 6;
+/**
+ * Assign a cell of the sponsor atlas to a geometry's uvs.
+ *
+ * The grid dimensions are re-exported from propTextures rather than restated
+ * here. They were duplicated, and a duplicated constant means adding a row to
+ * the atlas silently shifts every UV in the game by a row instead of failing.
+ */
+export { ATLAS_COLS, ATLAS_ROWS };
 export function atlasUV(geo, cell, flipV = false) {
   const cx = cell % ATLAS_COLS, cy = Math.floor(cell / ATLAS_COLS);
   const uv = geo.attributes.uv;

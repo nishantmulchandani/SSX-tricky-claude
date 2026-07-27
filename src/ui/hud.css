@@ -61,7 +61,7 @@ html, body { width: 100%; height: 100%; overflow: hidden; background: #000; font
 
 /* Display type: heavy, skewed, and armoured against a white background. */
 .dt, .score__val, .clockblk__val, .speedo__num, .mult__val, .trick__current,
-.combo__name, .combo__pts, .trick__bannerword, .crash__word, .count,
+.combo__name, .combo__pts, .trick__bannerword, .crash__word, .count, .split__delta,
 .logo__a, .logo__b, .ov__title, .res__score, .air__val, .grind__name {
   font-family: var(--f-disp);
   font-weight: 900;
@@ -140,6 +140,43 @@ html, body { width: 100%; height: 100%; overflow: hidden; background: #000; font
   border-left-color: var(--cy);
 }
 .clockblk__val { font-size: var(--f-lg); line-height: 1; margin-top: calc(var(--s) * 3px); color: #eaf6ff; }
+
+/* ── checkpoint split ───────────────────────────────────────────────────── */
+/* Sits beside the progress rail, opposite the checkpoint ticks, and only
+   exists for a few seconds after each gantry. Opacity + transform only, so
+   showing and hiding it never costs a reflow. */
+.split {
+  position: absolute;
+  right: calc(var(--gx) + var(--sar) + var(--s) * 46px);
+  top: 50%;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: calc(var(--s) * 3px);
+  padding: calc(var(--s) * 8px) calc(var(--s) * 14px) calc(var(--s) * 9px);
+  background: var(--slab);
+  border-right: calc(var(--s) * 4px) solid var(--cy);
+  opacity: 0;
+  transform: translateY(-50%) translateX(calc(var(--s) * 12px));
+  transition: opacity .18s ease-out, transform .18s ease-out;
+  will-change: opacity, transform;
+}
+.split.is-on { opacity: 1; transform: translateY(-50%); animation: splitin .34s cubic-bezier(.2, .9, .25, 1); }
+@keyframes splitin {
+  0%   { transform: translateY(-50%) translateX(calc(var(--s) * 22px)); opacity: 0; }
+  100% { transform: translateY(-50%); opacity: 1; }
+}
+.split.is-up   { border-right-color: var(--good); }
+.split.is-down { border-right-color: var(--pop); }
+.split__name {
+  font: 800 var(--f-sm)/1 var(--f-sys);
+  letter-spacing: .10em;
+  color: #9fb4c8;
+  white-space: nowrap;
+}
+.split__delta { font-size: var(--f-md); line-height: 1; color: #eaf6ff; }
+.split.is-up   .split__delta { color: #6cf0a8; }   /* ahead of the best run */
+.split.is-down .split__delta { color: #ff7a6a; }
 
 /* ── run progress rail ──────────────────────────────────────────────────── */
 .prog {

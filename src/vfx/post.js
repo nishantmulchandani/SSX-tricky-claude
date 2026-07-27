@@ -133,6 +133,11 @@ export function createPostStack(engine, { sky } = {}) {
   gu.uLift.value = new THREE.Vector3(0.002, 0.004, 0.010);
   gu.uSaturation.value = 1.24;
   gu.uContrast.value = 1.14;
+  // The contrast above is what pushes sunlit snow over 1.0, so the shoulder has
+  // to come down with it. At 1.14 around a 0.42 pivot, anything that reaches the
+  // grade above ~0.93 used to land on flat white; 0.78 catches all of that and
+  // still leaves the whole midtone range completely untouched.
+  gu.uShoulder.value = 0.78;
   gu.uVignette.value = 0.30;
   gu.uAberration.value = 0.0012;
   grade.renderToScreen = true;

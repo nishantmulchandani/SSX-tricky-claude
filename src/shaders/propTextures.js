@@ -9,7 +9,8 @@
 import * as THREE from 'three';
 import { mulberry32 } from '../core/noise.js';
 
-const COLS = 4, ROWS = 6;
+export const ATLAS_COLS = 4, ATLAS_ROWS = 7;
+const COLS = ATLAS_COLS, ROWS = ATLAS_ROWS;
 const CW = 256, CH = 128;
 
 /** Fictional sponsors. No real trademarks anywhere on this mountain. */
@@ -38,6 +39,7 @@ export const CELL = {
   km6: 16,            // .. km6 + 5  ->  6 KM .. 1 KM
   seriesBanner: 22,
   blank: 23,
+  checkpoint1: 24,    // .. checkpoint1 + 3  ->  CHECKPOINT 1..4
 };
 
 function cellRect(i) {
@@ -217,7 +219,7 @@ function pisteMarkerCell(ctx, i) {
 }
 
 let _atlas = null;
-/** 4x6 atlas of banners, signage, netting and pennants. Alpha-tested. */
+/** 4x7 atlas of banners, signage, netting and pennants. Alpha-tested. */
 export function propAtlas() {
   if (_atlas) return _atlas;
   const cv = document.createElement('canvas');
@@ -238,6 +240,9 @@ export function propAtlas() {
   for (let k = 0; k < 6; k++) signCell(ctx, CELL.km6 + k, `${6 - k} KM`, '#101820', '#ffe066', 'TO FINISH');
   signCell(ctx, CELL.seriesBanner, 'SUMMIT SERIES', '#101a2c', '#7fd4ff', 'STAGE 4 - TRICKY');
   signCell(ctx, CELL.blank, ' ', '#f2f4f8', '#f2f4f8');
+  for (let k = 0; k < 4; k++) {
+    signCell(ctx, CELL.checkpoint1 + k, `CHECKPOINT ${k + 1}`, '#12301c', '#8dffb0', 'SPLIT TIME');
+  }
 
   const tex = new THREE.CanvasTexture(cv);
   tex.colorSpace = THREE.SRGBColorSpace;

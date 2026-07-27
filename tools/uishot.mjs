@@ -86,6 +86,23 @@ const shots = [
     },
   },
   {
+    // The split readout only exists for ~3s after a gantry, and its colour
+    // needs a previous run to compare against, so both are set up explicitly.
+    name: '03b-split',
+    go: async () => {
+      await page.evaluate(() => {
+        const g = globalThis.__game;
+        g.run.reset(); g.run.beginCountdown();
+        g.run.state = 'riding'; g.run.countdown = 0;
+        // Pretend a faster run already happened, so CP1 shows a real delta.
+        g.run.bestTime = 120;
+        g.run.bestSplits = [22.0, 52.0, 80.0, 108.0];
+        g.body.reset(-1180); g.body.vel.set(0, 0, -42); g.chase.snap(g.body);
+      });
+      await settle(3.2);
+    },
+  },
+  {
     name: '04-paused',
     go: async () => { await page.evaluate(() => globalThis.__game.run.togglePause()); await page.waitForTimeout(4000); },
   },

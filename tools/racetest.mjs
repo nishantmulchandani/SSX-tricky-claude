@@ -11,7 +11,8 @@
  */
 import { Racer } from '../src/race/racer.js';
 import { AIController } from '../src/race/aiController.js';
-import { COURSE_LENGTH, courseXAt, trackLimitAt } from '../src/world/terrain.js';
+import { COURSE_LENGTH, courseXAt, trackLimitAt, CHECKPOINTS } from '../src/world/terrain.js';
+import { GameState } from '../src/core/gameState.js';
 import { FIXED_DT as DT } from '../src/core/engine.js';
 
 const failures = [];
@@ -117,6 +118,53 @@ check('nobody rides off the course for long', stats.every((s) => s.offTrack < 8)
   `worst ${Math.max(...stats.map((s) => s.offTrack)).toFixed(0)}s`);
 check('the AI actually lands tricks', racers.some((r) => r.tricks.score > 0),
   `best score ${Math.max(...racers.map((r) => Math.round(r.tricks.score)))}`);
+
+// --- checkpoint splits -----------------------------------------------------
+// The gantries are only worth building if they stop a clock. Driven with a
+// synthetic body rather than a real racer: what is under test is the split
+// bookkeeping, and a scripted constant-speed descent makes the expected times
+// arithmetic instead of a guess.
+console.log('\n=== CHECKPOINT SPLITS ===');
+{
+  const body = { pos: { z: 0 } };
+  const run = new GameState();
+  const ride = (speed, limit = 400) => {
+    run.beginCountdown();
+    body.pos.z = 0;
+    for (let i = 0; i < 600 && run.state !== 'riding'; i++) run.fixedUpdate(DT, body, null);
+    const seen = [];
+    for (let t = 0; t < limit && body.pos.z > -COURSE_LENGTH - 10; t += DT) {
+      body.pos.z -= speed * DT;
+      run.fixedUpdate(DT, body, null);
+      if (run.lastSplit && !seen.some((s) => s.index === run.lastSplit.index)) {
+        seen.push({ ...run.lastSplit });
+      }
+    }
+    return seen;
+  };
+
+  const fast = ride(50);
+  console.log('  splits @50m/s: ' + run.splits.map((s) => s?.toFixed(2)).join('  '));
+  check('every checkpoint takes a split', run.splits.every((s) => s != null),
+    `${run.splits.filter((s) => s != null).length}/${CHECKPOINTS.length}`);
+  check('splits are in course order',
+    run.splits.every((s, i) => i === 0 || s > run.splits[i - 1]));
+  check('the first run has no delta to compare against',
+    fast.every((s) => s.delta === null));
+
+  const slow = ride(40);
+  console.log('  deltas @40m/s: ' + slow.map((s) => '+' + s.delta.toFixed(2)).join('  '));
+  check('a slower run is down on every split', slow.every((s) => s.delta > 0));
+  check('deltas grow as the run falls further behind',
+    slow.every((s, i) => i === 0 || s.delta > slow[i - 1].delta));
+
+  // A rider who bounces back uphill past an arch must not re-trigger it.
+  const before = JSON.stringify(run.splits);
+  body.pos.z = CHECKPOINTS[0];
+  run.fixedUpdate(DT, body, null);
+  check('backtracking past an arch does not re-trigger its split',
+    JSON.stringify(run.splits) === before);
+}
 
 console.log(`\nRESULT: ${failures.length ? 'FAIL (' + failures.join(', ') + ')' : 'PASS'}`);
 process.exit(failures.length ? 1 : 0);

@@ -128,7 +128,9 @@ async function main() {
     await page.waitForTimeout((s.wait ?? 3) * 1000);
     const out = args.out || `${dir}/${s.name}.png`;
     mkdirSync(dirname(out), { recursive: true });
-    await page.screenshot({ path: out });
+    // Software rendering draws the full post stack at well under 1fps, so the
+    // default 30s screenshot timeout is not enough for a 1080p frame.
+    await page.screenshot({ path: out, timeout: 180000 });
     console.log('wrote', out);
   }
 

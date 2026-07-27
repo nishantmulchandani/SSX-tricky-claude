@@ -23,9 +23,10 @@ import * as THREE from 'three';
 import { mulberry32 } from '../core/noise.js';
 import {
   heightAt, courseXAt, courseAt, progressAt, courseFeatures, COURSE_LENGTH, BERM_RUN,
+  CHECKPOINTS,
 } from './terrain.js';
 import {
-  cyl, box, card, xf, span, paint, waveByX, atlasUV, mergeAll, truss, clamp,
+  cyl, box, card, xf, span, slab, paint, waveByX, atlasUV, mergeAll, truss, clamp,
 } from './propCommon.js';
 import { CELL, BRANDS } from '../shaders/propTextures.js';
 
@@ -325,12 +326,20 @@ export function emitCourse(sink, z0, z1, bucket) {
   for (const f of FEATURES) {
     if (f.z < z0 || f.z >= z1) continue;
     const cx = courseXAt(f.z);
-    for (const side of [-1, 1]) {
-      const x = cx + f.off + side * (f.w * 0.92 + 1.5);
-      paddedPost(out, V(x, heightAt(x, f.z), f.z), side < 0 ? 0xd11a2a : 0x1350c8);
-      const x2 = cx + f.off + side * (f.w * 0.92 + 1.5);
-      const z2 = f.z - (f.gap || 0) - f.len * 1.2;
-      paddedPost(out, V(x2, heightAt(x2, z2), z2), side < 0 ? 0xd11a2a : 0x1350c8);
+    // A pipe marks its own edges with coping; gate posts planted halfway up a
+    // transition would stand at 45 degrees in the middle of the rideable wall.
+    if (f.type !== 'pipe') {
+      // Gate posts flag the mouth of a feature, so they belong at the edge of
+      // the piste. The wide features (climbs are 30 m across) are wider than
+      // the groomed ribbon itself, and posting at their own half-width put the
+      // gates out on the berm where nobody rides.
+      const gate = Math.min(f.w * 0.92 + 1.5, halfAt(f.z) + 1.0);
+      for (const side of [-1, 1]) {
+        const x = cx + f.off + side * gate;
+        paddedPost(out, V(x, heightAt(x, f.z), f.z), side < 0 ? 0xd11a2a : 0x1350c8);
+        const z2 = f.z - (f.gap || 0) - f.len * 1.2;
+        paddedPost(out, V(x, heightAt(x, z2), z2), side < 0 ? 0xd11a2a : 0x1350c8);
+      }
     }
     // a short row of crowd hoardings on the landing side of the big hits
     if (f.h >= 9) {
@@ -363,6 +372,49 @@ export function emitCourse(sink, z0, z1, bucket) {
     const z = -s - 210;
     if (z > -140 || z < -COURSE_LENGTH + 140) continue;
     signBoard(out, z, rng() < 0.5 ? -1 : 1, CELL.pisteMarker, 2.2, 1.5);
+  }
+
+  // ---- half-pipe coping ---------------------------------------------------
+  // A pipe with no coping reads as a random dip in the snow. The painted lip
+  // is what tells you at a glance where the wall ends and how high it is, and
+  // it is the line you aim for on the way up. Drawn as a run of short slabs
+  // following the top of each transition, so it bends with the course.
+  for (const f of FEATURES) {
+    if (f.type !== 'pipe') continue;
+    const zTop = f.z + f.len, zBot = f.z - f.len;
+    if (zTop < z0 || zBot >= z1) continue;
+    const STEP = 6;
+    for (const side of [-1, 1]) {
+      let prev = null;
+      for (let z = Math.min(zTop, z1); z >= Math.max(zBot, z0) - STEP; z -= STEP) {
+        const x = courseXAt(z) + f.off + side * f.w;
+        const p = V(x, heightAt(x, z), z);
+        if (prev) {
+          // Alternating red/white, the same language as the course walls.
+          const col = Math.round(-z / STEP) % 2 ? 0xd8321f : 0xf2f4f8;
+          out.matte.push(paint(slab(prev, p, 0.55, 0.30), col));
+        }
+        prev = p;
+      }
+    }
+  }
+
+  // ---- checkpoint arches --------------------------------------------------
+  // The reference courses put a lit gantry over the piste at every split, and
+  // it does two jobs at once: it tells you where you are on the mountain, and
+  // it gives the run a sense of staged progress instead of one undifferentiated
+  // slope. Placed on the section boundaries, so each one reads as "you cleared
+  // that part".
+  for (let i = 0; i < CHECKPOINTS.length; i++) {
+    const z = CHECKPOINTS[i];
+    if (z < z0 || z >= z1) continue;
+    arch(out, z, CELL.checkpoint1 + i, CELL.seriesBanner);
+    // Crowd packed either side of a checkpoint, as at a real race split.
+    for (let k = 0; k < 8; k++) {
+      const side = k < 4 ? -1 : 1;
+      const p = edge(z + 12 - (k % 4) * 2.8, side, 6.2);
+      hoarding(out, p, Math.PI * 0.5, CELL.brand0 + ((k + i) % BRANDS.length));
+    }
   }
 
   // ---- start gate and finish arch -----------------------------------------
