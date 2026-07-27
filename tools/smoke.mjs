@@ -107,14 +107,19 @@ if (!booted) {
     for (let i = 0; i < steps; i++) {
       // Hold the fall line, and pop an ollie every second to exercise the
       // air/trick/landing path rather than only steady-state riding.
+      // Steering must go through actions — input.poll() recomputes axis.steer
+      // from key state at the top of fixedUpdate and would overwrite it.
       const cx = g.__courseX ? g.__courseX(g.body.pos.z) : 0;
-      const err = g.body.pos.x - cx;
-      g.input.axis.steer = Math.max(-0.5, Math.min(0.5, err * 0.02 + g.body.vel.x * 0.05));
+      const err = (g.body.pos.x - cx) * 0.02 + g.body.vel.x * 0.05;
+      g.input.actions.right = err > 0.08;
+      g.input.actions.left = err < -0.08;
       const phase = i % 120;
       g.input.actions.jump = phase < 30;
       g.input.released.jump = phase === 30;
 
       sys.fixedUpdate(DT, i * DT);
+      // VFX, rider rig and camera live in the variable-rate update.
+      if (i % 2 === 0) sys.update(DT * 2, 0, i * DT);
       // Let the browser breathe so rendering still happens alongside.
       if (i % 240 === 0) await new Promise((r) => setTimeout(r, 0));
     }

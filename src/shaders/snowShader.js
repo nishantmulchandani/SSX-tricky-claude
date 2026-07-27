@@ -205,13 +205,21 @@ export const snowSurface = /* glsl */`
     snLost += ( 1.0 - w ) * ( a * f ) * ( a * f ) * snSnow;
   }
 
-  // band 4: groomer corduroy, 22 cm ribs running down the fall line
+  // band 4: groomer corduroy, 22 cm ribs running down the fall line.
+  //
+  // This band needs a much tighter Nyquist gate than the noise bands. A pure
+  // periodic signal aliases into wide, coherent beat patterns — the slope ends
+  // up looking like corrugated iron — whereas undersampled noise just turns to
+  // harmless mush. Gating at 2.2x the nominal frequency retires the ribs at
+  // roughly a quarter of their period instead of at the Nyquist limit.
   {
     float f = 4.55;
-    float w = snBandW( f, snPx ) * snPiste;
+    float w = snBandW( f * 2.2, snPx ) * snPiste;
     if ( w > 0.003 ) {
       float ph = ( snP.x - snCW.x ) * 28.6 + snNoise( vec2( snP.z * 0.012, 3.7 ) ) * 2.2;
-      float a  = 0.012 * uDetail * ( 0.75 + 0.25 * snNoise( vec2( snP.z * 0.09, 11.0 ) ) );
+      // ~5 mm deep. Real corduroy is shallow; at 1.2 cm the ribs read as
+      // ploughed furrows rather than a groomed piste.
+      float a  = 0.005 * uDetail * ( 0.75 + 0.25 * snNoise( vec2( snP.z * 0.09, 11.0 ) ) );
       snDH.x  += cos( ph ) * 28.6 * a * w;
     }
   }

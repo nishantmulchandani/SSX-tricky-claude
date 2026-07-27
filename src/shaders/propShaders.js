@@ -325,6 +325,13 @@ function patchTree(mat, { mode = 0, sway = 0.06 } = {}) {
   return mat;
 }
 
+/*
+ * Foliage edges: alphaTest alone gives a hard binary cutout, which aliases
+ * badly and makes the mid-distance forest crawl and sparkle as mip levels
+ * shift alpha coverage across the threshold. The scene pass is already
+ * multisampled (vfx/post.js sets samples: 4), so alpha-to-coverage resolves
+ * those edges properly for free.
+ */
 /** Near tier: real geometry — tapered trunk plus drooping needle cards. */
 export function makeTreeNear() {
   const m = new THREE.MeshStandardMaterial({
@@ -334,6 +341,7 @@ export function makeTreeNear() {
     metalness: 0.0,
     side: THREE.DoubleSide,
     alphaTest: 0.42,
+    alphaToCoverage: true,
     name: 'treeNear',
   });
   m.userData.propSnow = { value: 0.62 };
@@ -349,6 +357,7 @@ export function makeTreeCross() {
     metalness: 0.0,
     side: THREE.DoubleSide,
     alphaTest: 0.40,
+    alphaToCoverage: true,
     name: 'treeCross',
   });
   m.userData.propSnow = { value: 0.0 };
@@ -364,6 +373,7 @@ export function makeTreeFar() {
     metalness: 0.0,
     side: THREE.DoubleSide,
     alphaTest: 0.36,
+    alphaToCoverage: true,
     name: 'treeFar',
   });
   m.userData.propSnow = { value: 0.0 };

@@ -66,12 +66,45 @@ async function main() {
       if (g.run) { g.run.state = 'riding'; g.run.countdown = 0; }
       g.body.reset(s.z);
       g.body.vel.set(0, 0, -(s.speed || 20));
-      if (s.steer !== undefined) g.__steer = s.steer;
+      if (s.steer !== undefined) g.__driveSteer = s.steer;
       if (s.air) { g.body.pos.y += 26; g.body.vel.y = 9; g.body.grounded = false; }
       g.chase.snap(g.body);
       g.mountain.update(g.engine.camera.position);
     }, s);
-    // Let the sim settle so terrain streaming, LOD and VFX reach steady state.
+    // Step the simulation deterministically so VFX reach a steady state.
+    // Software rendering runs well under 1 fps here, so simply waiting would
+    // capture a frame with barely any simulated time elapsed — no spray, no
+    // settled particles. Driving fixedUpdate directly gives the same code path
+    // at a known rate. A held steer produces a sustained carve.
+    await page.evaluate(async (s) => {
+      const g = globalThis.__game;
+      const sys = g.engine.systems.find((x) => x.fixedUpdate);
+      const DT = 1 / 120;
+      const steps = Math.round((s.settle ?? 2.2) / DT);
+      for (let i = 0; i < steps; i++) {
+        // Steering MUST be injected through actions, not axis.steer:
+        // input.poll() runs at the top of fixedUpdate and recomputes the axis
+        // from key state, silently overwriting anything written directly.
+        if (s.steer !== undefined) {
+          g.input.actions.right = s.steer > 0;
+          g.input.actions.left = s.steer < 0;
+        } else {
+          const cx = g.__courseX(g.body.pos.z);
+          const err = (g.body.pos.x - cx) * 0.02 + g.body.vel.x * 0.05;
+          g.input.actions.right = err > 0.08;
+          g.input.actions.left = err < -0.08;
+        }
+        g.input.actions.tuck = true;
+        sys.fixedUpdate(DT, i * DT);
+        // VFX, the rider rig and the camera live in the VARIABLE-rate update,
+        // not fixedUpdate. Software rendering only reaches ~0.5fps here, so
+        // without driving update() too the particle systems never emit and the
+        // capture shows no spray at all.
+        if (i % 2 === 0) sys.update(DT * 2, 0, i * DT);
+        if (i % 240 === 0) await new Promise((r) => setTimeout(r, 0));
+      }
+    }, s);
+    // Now give the renderer real time to actually draw the frame.
     await page.waitForTimeout((s.wait ?? 3) * 1000);
     const out = args.out || `${dir}/${s.name}.png`;
     mkdirSync(dirname(out), { recursive: true });
