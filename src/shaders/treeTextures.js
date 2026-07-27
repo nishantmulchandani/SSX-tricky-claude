@@ -2,8 +2,11 @@
  * OWNER: agent "props".
  *
  * Procedural conifer textures:
- *   barkNeedleAtlas() — 512x512, left half bark, right half a needle branch
- *                       card used by the full-3D near LOD.
+ *   barkNeedleAtlas() — 512x512. Left half is bark. The right half is split into
+ *                       a green needle spray (top) and the same spray under a
+ *                       snow load (bottom); the near LOD lays the snowy card
+ *                       just above the green one so the load has real thickness
+ *                       and a ragged edge instead of being a white wash.
  *   coniferAtlas()    — 1024x1024, 2x2 whole-tree silhouettes with snow load,
  *                       used by the crossed-billboard mid LOD and the single
  *                       camera-facing far LOD.
@@ -106,6 +109,56 @@ function drawNeedleCard(ctx, x, y, w, h, rng) {
   ctx.globalAlpha = 1;
 }
 
+/**
+ * The same spray, buried. Drawn as a mat of small overlapping caps following
+ * the needle envelope, so the alpha edge stays ragged and the clumps catch
+ * their own shading rather than reading as a painted-on white stripe.
+ */
+function drawSnowCard(ctx, x, y, w, h, rng) {
+  const midY = y + h * 0.5;
+  for (let i = 0; i < 300; i++) {
+    const t = Math.pow(rng(), 0.62);
+    const sx = x + w * (0.03 + t * 0.92);
+    const spread = (h * 0.44) * Math.pow(1 - t, 0.7);
+    const off = (rng() * 2 - 1) * spread;
+    const px = sx + Math.abs(off) * 0.35;
+    const py = midY + off;
+    const r = (h * 0.028 + rng() * h * 0.045) * (0.45 + (1 - t) * 0.8);
+    const shade = 0.86 + rng() * 0.14;
+    ctx.fillStyle = `rgb(${Math.round(226 * shade)},${Math.round(238 * shade)},${Math.round(252 * shade)})`;
+    ctx.beginPath();
+    ctx.ellipse(px, py, r * (1.1 + rng() * 0.7), r * (0.62 + rng() * 0.4), (rng() - 0.5) * 0.9, 0, 7);
+    ctx.fill();
+  }
+  // a few dark needle tips poking through the load
+  ctx.strokeStyle = 'rgba(22,46,26,0.75)';
+  for (let i = 0; i < 70; i++) {
+    const t = rng();
+    const sx = x + w * (0.05 + t * 0.9);
+    const spread = (h * 0.42) * Math.pow(1 - t, 0.7);
+    const off = (rng() * 2 - 1) * spread;
+    ctx.lineWidth = 1 + rng() * 1.6;
+    ctx.beginPath();
+    ctx.moveTo(sx, midY + off);
+    ctx.lineTo(sx + h * 0.03 * rng(), midY + off + (rng() - 0.5) * h * 0.05);
+    ctx.stroke();
+  }
+  // bright rim on the sunward side of each clump ridge
+  ctx.globalAlpha = 0.5;
+  ctx.fillStyle = '#ffffff';
+  for (let i = 0; i < 90; i++) {
+    const t = Math.pow(rng(), 0.6);
+    const sx = x + w * (0.04 + t * 0.9);
+    const spread = (h * 0.4) * Math.pow(1 - t, 0.7);
+    const off = (rng() * 2 - 1) * spread;
+    const r = h * 0.016 + rng() * h * 0.022;
+    ctx.beginPath();
+    ctx.ellipse(sx, midY + off, r * 1.3, r * 0.55, 0, 0, 7);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+}
+
 let _barkTex = null;
 export function barkNeedleAtlas() {
   if (_barkTex) return _barkTex;
@@ -116,7 +169,8 @@ export function barkNeedleAtlas() {
   ctx.clearRect(0, 0, S, S);
   const rng = mulberry32(0x5EED11);
   drawBark(ctx, 0, 0, S * 0.5, S, rng);
-  drawNeedleCard(ctx, S * 0.5, 0, S * 0.5, S, rng);
+  drawNeedleCard(ctx, S * 0.5, 0, S * 0.5, S * 0.5, rng);
+  drawSnowCard(ctx, S * 0.5, S * 0.5, S * 0.5, S * 0.5, rng);
   const tex = new THREE.CanvasTexture(cv);
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.anisotropy = 8;

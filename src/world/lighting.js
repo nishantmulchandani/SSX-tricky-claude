@@ -29,12 +29,12 @@ const MAX_FAR = 2200;
 // Optional coarse terrain proxy used purely as a shadow caster. The real
 // terrain mesh is camera-centred and 9 km wide, which is not something you want
 // to re-render into four cascades every frame.
-const CASTER_STEP = 22;      // metres between proxy vertices
-const CASTER_HALF_WIDTH = 900;
-const CASTER_SINK = 7;       // metres of drop, so the proxy never shadows itself
+const CASTER_STEP = 18;      // metres between proxy vertices
+const CASTER_HALF_WIDTH = 1000;
+const CASTER_SINK = 6;       // metres of drop, so the proxy never shadows itself
 
 export function createLightRig(scene, renderer, opts = {}) {
-  const { terrainShadows = true, shadowMapSize = 2048 } = opts;
+  const { terrainShadows = true, shadowMapSize = 2048, materialPatch = null } = opts;
 
   renderer.shadowMap.enabled = true;
   // VSM's blur leaks badly across a 2 km cascade and fights the CSM cascade
@@ -111,6 +111,9 @@ export function createLightRig(scene, renderer, opts = {}) {
       shader.uniforms.shadowFar = { value: far };
       csm.shaders.set(material, shader);
       if (previous) previous.call(this, shader, rendererRef);
+      // Aerial perspective goes on last, so it sees the final fragment shader
+      // the owning module produced and folds the atmosphere over the top of it.
+      if (materialPatch) materialPatch(shader, material);
     };
 
     material.onBeforeCompile = wrapper;
@@ -154,9 +157,11 @@ export function createLightRig(scene, renderer, opts = {}) {
       const cam = csm.lights[i].shadow.camera;
       const texel = (cam.right - cam.left) / shadowMapSize;
       // Slope-scaled offset: push the receiver along its normal by rather more
-      // than one texel so grazing sun angles on snow cannot self-shadow.
-      csm.lights[i].shadow.normalBias = Math.max(0.02, texel * 2.2);
-      csm.lights[i].shadow.bias = -0.00006 - texel * 2e-6;
+      // than one texel so grazing sun angles on snow cannot self-shadow. Capped,
+      // because on the 2 km cascade one texel is metres wide and an uncapped
+      // offset detaches every shadow from its caster (classic peter-panning).
+      csm.lights[i].shadow.normalBias = THREE.MathUtils.clamp(texel * 1.35, 0.03, 1.1);
+      csm.lights[i].shadow.bias = -0.00004 - texel * 1e-6;
     }
   }
 
@@ -216,13 +221,28 @@ function buildTerrainCaster(scene) {
   geo.setIndex(new THREE.BufferAttribute(new Uint32Array(idx), 1));
   geo.computeBoundingSphere();
 
-  const mesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial());
+  // three's shadow map tests every candidate caster against the *main* camera's
+  // layer mask (WebGLShadowMap.renderObject), so a mesh parked on a layer the
+  // camera does not draw is silently dropped from the shadow map as well. The
+  // proxy therefore has to sit on layer 0 and be made invisible the only other
+  // way available: a material that writes neither colour nor depth. The shadow
+  // pass substitutes its own depth material, so the proxy still casts.
+  const mat = new THREE.MeshBasicMaterial({
+    colorWrite: false, depthWrite: false, depthTest: false,
+  });
+  const mesh = new THREE.Mesh(geo, mat);
   mesh.name = 'terrain-shadow-caster';
   mesh.castShadow = true;
   mesh.receiveShadow = false;
   mesh.visible = true;   // must stay "visible" to be rendered into the shadow map
-  mesh.layers.disableAll();
-  mesh.layers.enable(31); // parked on a layer the main camera does not draw
+  mesh.renderOrder = -2000;
   scene.add(mesh);
+
+  // ...and skipped entirely by the half-res depth prepass, which does override
+  // the material and would otherwise stamp the sunken proxy into scene depth.
+  import('../vfx/sceneDepth.js')
+    .then((m) => m.excludeFromDepth?.(mesh))
+    .catch(() => {});
+
   return mesh;
 }

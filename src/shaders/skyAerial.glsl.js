@@ -119,17 +119,29 @@ vec3 skyAerialPerspective(vec3 color, vec3 worldPos) {
   return color * T + inscatter;
 }
 
+float skyCloudNoise(vec2 p) {
+  vec4 n = texture2D(uAerialNoise, p);
+  return n.r * 0.5 + n.g * 0.26 + n.b * 0.15 + n.a * 0.09;
+}
+
 /**
  * Sun visibility under the cumulus deck, 0..1. Cheap: projects the point up the
  * sun ray to cloud height and samples the same tiling noise the dome uses.
+ *
+ * The density field is evaluated exactly as the dome evaluates it — same warp,
+ * same base/detail mix, same coverage threshold — so a cloud and its shadow are
+ * the same object. uAerialCloudWind carries only the wind phase; the camera
+ * offset the dome folds into its own wind uniform must NOT appear here, because
+ * this samples absolute world positions rather than camera-relative ones.
  */
 float skyCloudShadow(vec3 worldPos) {
   if (uAerialCloudShadow <= 0.0) return 1.0;
   float t = (uAerialCloudAltitude - worldPos.y) / max(uAerialSunDir.y, 0.15);
   vec2 q = (worldPos.xz + uAerialSunDir.xz * t) * uAerialCloudScale + uAerialCloudWind;
-  vec4 n = texture2D(uAerialNoise, q);
-  float d = n.r * 0.5 + n.g * 0.26 + n.b * 0.15 + n.a * 0.09;
-  float cov = smoothstep(uAerialCloudCoverage - 0.01, uAerialCloudCoverage + 0.12, d);
+
+  vec2 w = vec2(skyCloudNoise(q * 0.27), skyCloudNoise(q * 0.27 + vec2(0.41, 0.13))) - 0.5;
+  float d = skyCloudNoise(q + w * 0.55) * 0.74 + skyCloudNoise(q * 3.1 + w * 1.3) * 0.26;
+  float cov = clamp((d - uAerialCloudCoverage) * 7.0, 0.0, 1.0);
   return 1.0 - cov * uAerialCloudShadow;
 }
 

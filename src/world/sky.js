@@ -59,29 +59,33 @@ const DEFAULTS = {
 
   /** Top-of-atmosphere solar irradiance expressed in render units. */
   exposure: 4.6,
-  /** Aerosol load. 1 = molecular only (unphysically clean), 3-4 = alpine. */
-  haze: 2.6,
+  /** Aerosol load. 1 = molecular only (unphysically clean), 3-4 = hazy valley.
+   *  High alpine air really is close to pristine, and the deep blue that comes
+   *  with it is most of what says "3000 m" before any geometry does. */
+  haze: 1.45,
   mieG: 0.76,
   /** Snowfield albedo seen by the atmosphere — a big part of the horizon lift. */
   groundAlbedo: 0.62,
 
   /** Sun disc / aureole peak radiance, render units. */
   sunDisc: 2600.0,
-  sunGlow: 26.0,
+  sunGlow: 60.0,
   /** 0.267 deg. The real thing; anything larger reads as a cartoon. */
   sunAngularRadius: 0.00466,
 
   // Cloud decks. Altitudes are absolute, in kilometres.
-  cumulus: 0.85,
-  cumulusCoverage: 0.545,
+  cumulus: 0.95,
+  cumulusCoverage: 0.60,
   cumulusAltitude: 3.4,
   cumulusScale: 0.115,
   cumulusDensity: 7.5,
-  cirrus: 0.55,
-  cirrusCoverage: 0.50,
-  cirrusAltitude: 8.6,
+  cirrus: 0.45,
+  cirrusCoverage: 0.575,
+  cirrusAltitude: 7.2,
   cirrusScale: 0.055,
   windSpeed: 0.0026,
+  /** How much sun the cumulus deck takes away where its shadow lands, 0..1. */
+  cloudShadow: 0.5,
 
   /** Artistic gain on aerial perspective. 1 = physical. */
   aerialStrength: 2.15,
@@ -249,11 +253,15 @@ export function createSky(scene, renderer, opts = {}) {
     uAerialCamAltKm: altUniform,
     uAerialExposure: { value: cfg.exposure },
     uAerialNoise: { value: cloudNoise },
-    uAerialCloudWind: { value: domeUniforms.uCloudWind.value },
+    // Wind phase ONLY. The dome folds the camera offset into its own copy of
+    // this because it integrates in a camera-centred frame; the aerial chunk
+    // samples absolute world positions, so adding it again would double it and
+    // the cloud shadows would slide out from under the clouds.
+    uAerialCloudWind: { value: new THREE.Vector2() },
     uAerialCloudScale: { value: cfg.cumulusScale * 1e-3 },
     uAerialCloudCoverage: { value: cfg.cumulusCoverage },
     uAerialCloudAltitude: { value: cfg.cumulusAltitude * 1000 },
-    uAerialCloudShadow: { value: 0.0 },
+    uAerialCloudShadow: { value: cfg.cloudShadow },
   };
 
   /**
@@ -275,12 +283,31 @@ export function createSky(scene, renderer, opts = {}) {
       return;
     }
 
-    if (shader.fragmentShader.includes('#include <opaque_fragment>')) {
-      shader.fragmentShader = shader.fragmentShader
-        .replace('#include <common>',
-          `#include <common>\nvarying vec3 vSkyWorldPos;\n${SKY_AERIAL_GLSL}`)
-        .replace('#include <opaque_fragment>',
-          '#include <opaque_fragment>\ngl_FragColor.rgb = skyAerialPerspective( gl_FragColor.rgb, vSkyWorldPos );');
+    if (!shader.fragmentShader.includes('#include <opaque_fragment>')) return;
+
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>',
+        `#include <common>\nvarying vec3 vSkyWorldPos;\n${SKY_AERIAL_GLSL}`)
+      .replace('#include <opaque_fragment>',
+        '#include <opaque_fragment>\ngl_FragColor.rgb = skyAerialPerspective( gl_FragColor.rgb, vSkyWorldPos );');
+
+    // --- cloud shadows -------------------------------------------------------
+    // Applied to the direct term after the light loop closes, so it costs one
+    // noise lookup regardless of how many cascades the rig is running. The snow
+    // shader recovers sun visibility from the direct radiance it accumulated, so
+    // its own running total is scaled with it — otherwise snow under a cloud
+    // would keep its sparkle and its subsurface glow while going flat.
+    if (shader.fragmentShader.includes('#include <lights_fragment_end>')) {
+      const snow = shader.fragmentShader.includes('snowDirectSum')
+        ? '\n  snowDirectSum *= skySunVis;' : '';
+      shader.fragmentShader = shader.fragmentShader.replace(
+        '#include <lights_fragment_end>',
+        `#include <lights_fragment_end>
+{
+  float skySunVis = skyCloudShadow( vSkyWorldPos );
+  reflectedLight.directDiffuse *= skySunVis;
+  reflectedLight.directSpecular *= skySunVis;${snow}
+}`);
     }
 
     // --- compatibility shim, see docs/REQUESTS-atmosphere.md -----------------
@@ -459,6 +486,7 @@ export function createSky(scene, renderer, opts = {}) {
       // centred on the viewer, so the camera offset is folded into the phase.
       const s = domeUniforms.uCloudScale.value;
       windOffset.set(elapsedTime * cfg.windSpeed, elapsedTime * cfg.windSpeed * 0.35);
+      aerialUniforms.uAerialCloudWind.value.copy(windOffset);
       domeUniforms.uCloudWind.value.set(
         cam.position.x * 0.001 * s + windOffset.x,
         cam.position.z * 0.001 * s + windOffset.y,
@@ -568,11 +596,16 @@ function makeCloudNoise(size = 256) {
   const periods = [4, 8, 16, 32];
   const data = new Uint8Array(size * size * 4);
 
+  // Every product here has to go through Math.imul. The classic integer hash
+  // squares a 31-bit value, which in a JS double silently loses every bit below
+  // 2^-53 and collapses the hash into a handful of quantised outputs; the
+  // texture then comes out flat and the cloud decks render as a featureless
+  // grey veil over the whole sky.
   const ihash = (x, y, seed) => {
-    let n = (x * 1619 + y * 31337 + seed * 6971) | 0;
+    let n = (Math.imul(x, 1619) + Math.imul(y, 31337) + Math.imul(seed, 6971)) | 0;
     n = (n << 13) ^ n;
-    n = (n * (n * n * 15731 + 789221) + 1376312589) & 0x7fffffff;
-    return n / 1073741823.0 - 0.0;
+    n = (Math.imul(n, Math.imul(Math.imul(n, n), 15731) + 789221) + 1376312589) & 0x7fffffff;
+    return n / 2147483647.0;
   };
 
   const vnoise = (u, v, p, seed) => {

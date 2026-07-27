@@ -253,23 +253,33 @@ vec3 sampleSkyView(vec3 rd, vec3 origin, float r) {
 // --- procedural cloud noise -------------------------------------------------
 // One tileable RGBA fetch carries four octaves, so a full cloud sample costs a
 // handful of texture reads. Mipmaps do the far-field filtering for us.
-float cn(vec2 p) {
-  vec4 n = texture2D(uCloudNoise, p);
+// The second argument is an explicit LOD bias. Looking along a cloud deck the
+// sample rate rises without bound while the hardware footprint stays wildly
+// anisotropic, and the automatic mip choice ends up magnifying an almost-empty
+// mip back into hard axis-aligned blocks. Biasing the fetch by the distance of
+// the sample keeps the deck resolving into smooth, correctly filtered haze.
+float cn(vec2 p, float b) {
+  vec4 n = texture2D(uCloudNoise, p, b);
   return n.r * 0.5 + n.g * 0.26 + n.b * 0.15 + n.a * 0.09;
 }
 
-float cumulusThickness(vec2 q, float cov) {
-  vec2 w = vec2(cn(q * 0.27), cn(q * 0.27 + vec2(0.41, 0.13))) - 0.5;
-  float base = cn(q + w * 0.55);
-  float detail = cn(q * 3.1 + w * 1.3);
-  float d = base * 0.74 + detail * 0.26;
+/**
+ * Cumulus density above the coverage threshold. 'fine' adds the third octave,
+ * which is what stops the cell edges from being smooth analytic curves; the
+ * self-shadow taps pass 0 for it and save a fetch each, since they are already
+ * being smeared along the sun ray.
+ */
+float cumulusThickness(vec2 q, float cov, float b, float fine) {
+  vec2 w = vec2(cn(q * 0.27, b), cn(q * 0.27 + vec2(0.41, 0.13), b)) - 0.5;
+  float d = cn(q + w * 0.55, b) * 0.72 + cn(q * 3.1 + w * 1.3, b) * 0.28;
+  if (fine > 0.0) d += (cn(q * 8.3 + w * 2.4, b) - 0.5) * 0.16 * fine;
   return max(0.0, d - cov);
 }
 
-float cirrusThickness(vec2 q, float cov) {
-  vec2 w = vec2(cn(q * 0.11), cn(q * 0.11 + vec2(0.73, 0.29))) - 0.5;
-  float d = cn(vec2(q.x * 0.30, q.y * 1.7) + w * 0.85);
-  float d2 = cn(vec2(q.x * 1.10, q.y * 5.2) + w * 1.6);
+float cirrusThickness(vec2 q, float cov, float b) {
+  vec2 w = vec2(cn(q * 0.11, b), cn(q * 0.11 + vec2(0.73, 0.29), b)) - 0.5;
+  float d = cn(vec2(q.x * 0.30, q.y * 1.7) + w * 0.85, b);
+  float d2 = cn(vec2(q.x * 1.10, q.y * 5.2) + w * 1.6, b);
   d = d * 0.66 + d2 * 0.34;
   return max(0.0, d - cov);
 }
@@ -290,7 +300,11 @@ void main() {
   vec3 cloudRGB = vec3(0.0);
   float cloudA = 0.0;
 
-  if (rd.y > 0.002) {
+  // Anything much below ~1.5 degrees of elevation is looking along the deck for
+  // hundreds of kilometres: the sample rate through the noise explodes, the mip
+  // chain runs out and the deck breaks into blocks. Real cloud decks also just
+  // merge into the haze there, so both layers are faded out well before it.
+  if (rd.y > 0.008) {
     // Sun colour arriving at cloud height, plus the ambient sky the cloud sees.
     vec3 cloudSun = sunT * 4.6;
     vec3 cloudSky = sky * 1.4 + horizonCol * 0.5;
@@ -298,32 +312,39 @@ void main() {
     if (uCirrusAmount > 0.0) {
       float t = atmRaySphere(origin, rd, ATM_GROUND_R + uCirrusAltitude);
       if (t > 0.0) {
+        // Detail resolves out with distance, and the coverage threshold is
+        // softened with it so a far-off deck dissolves rather than breaking
+        // into hard-edged fragments once the noise stops resolving.
+        float b = clamp(log2(max(t, 4.0) * 0.16), 0.0, 5.0);
+        float soft = mix(5.0, 1.6, clamp(t * 0.016, 0.0, 1.0));
         vec3 p = origin + rd * t;
         vec2 q = p.xz * uCirrusScale + uCirrusWind;
-        float th = cirrusThickness(q, uCirrusCoverage);
-        float a = clamp(th * 5.0, 0.0, 1.0) * uCirrusAmount;
+        float th = cirrusThickness(q, uCirrusCoverage, b);
+        float a = clamp(th * soft, 0.0, 1.0) * uCirrusAmount;
         // Ice crystals scatter forward hard — cirrus near the sun goes brilliant.
         float fwd = pow(clamp(cosTheta, 0.0, 1.0), 8.0);
         vec3 c = cloudSun * (0.85 + fwd * 1.9) + cloudSky * 0.55;
-        float fade = exp(-t * 0.0055);
+        float fade = exp(-t * 0.006) * smoothstep(0.045, 0.16, rd.y);
         c = mix(horizonCol, c, fade);
-        cloudRGB = c; cloudA = a * mix(0.25, 1.0, fade);
+        cloudRGB = c; cloudA = a * fade;
       }
     }
 
     if (uCloudAmount > 0.0) {
       float t = atmRaySphere(origin, rd, ATM_GROUND_R + uCloudAltitude);
       if (t > 0.0) {
+        float b = clamp(log2(max(t, 2.0) * 0.4), 0.0, 5.0);
+        float soft = mix(9.0, 2.2, clamp(t * 0.045, 0.0, 1.0));
         vec3 p = origin + rd * t;
         vec2 q = p.xz * uCloudScale + uCloudWind;
-        float th = cumulusThickness(q, uCloudCoverage);
-        float a = clamp(th * 9.0, 0.0, 1.0) * uCloudAmount;
+        float th = cumulusThickness(q, uCloudCoverage, b, 1.0);
+        float a = clamp(th * soft, 0.0, 1.0) * uCloudAmount;
 
         if (a > 0.001) {
           // Cheap self-shadowing: march one step toward the sun inside the deck.
           vec2 sunStep = normalize(uSunDir.xz + vec2(1e-4, 0.0)) * (uCloudScale * 0.6 / max(uSunDir.y, 0.22));
-          float thS = cumulusThickness(q + sunStep, uCloudCoverage);
-          float thS2 = cumulusThickness(q + sunStep * 2.2, uCloudCoverage);
+          float thS = cumulusThickness(q + sunStep, uCloudCoverage, b, 0.0);
+          float thS2 = cumulusThickness(q + sunStep * 2.2, uCloudCoverage, b, 0.0);
           float shade = exp(-uCloudDensity * (thS * 0.75 + thS2 * 0.45));
 
           // Powder / dark-edge term keeps thin fringes from looking like fog.
@@ -334,8 +355,12 @@ void main() {
           vec3 amb = cloudSky * (0.34 + 0.30 * (1.0 - powder));
           vec3 c = lit + amb;
 
-          float fade = exp(-t * 0.011);
+          // Distance and horizon fade. The alpha has to fade with them: a deck
+          // that keeps full opacity while its colour converges on the haze
+          // leaves an opaque pale band lying across the horizon.
+          float fade = exp(-t * 0.016) * smoothstep(0.035, 0.145, rd.y);
           c = mix(horizonCol, c, fade);
+          a *= fade;
           cloudRGB = mix(cloudRGB, c, a);
           cloudA = cloudA + a - cloudA * a;
         }
@@ -348,8 +373,11 @@ void main() {
   // --- sun disc + aureole ---------------------------------------------------
   // The aureole is analytic because the sky-view LUT is far too coarse in solid
   // angle to hold the Mie forward peak. Occluded by the cloud deck.
+  // The three lobes are the aerosol forward peak, the aureole proper and the
+  // residual wide scatter. They have to fall off HARD: a broad tail here is
+  // indistinguishable from fog over the whole sky and it eats the blue.
   float clear = 1.0 - cloudA;
-  vec3 glow = sunT * uSunGlow * (exp(-theta * 24.0) * 0.85 + exp(-theta * 5.5) * 0.13 + exp(-theta * 1.6) * 0.02);
+  vec3 glow = sunT * uSunGlow * (exp(-theta * 120.0) * 0.75 + exp(-theta * 26.0) * 0.22 + exp(-theta * 7.0) * 0.03);
   col += glow * clear;
 
   if (uSunDiscIntensity > 0.0 && theta < uSunAngularRadius * 4.0) {

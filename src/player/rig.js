@@ -210,6 +210,43 @@ export class SkinBuilder {
     return rows;
   }
 
+  /**
+   * Bake an arbitrary BufferGeometry into the skin, rigidly bound to `bones`.
+   * This is how the hard props ride along — helmet shell, goggle lens, buckles,
+   * boot cuffs. They do not need to deform, only to follow a joint, so a fixed
+   * weight set is both correct and free.
+   */
+  addGeometry(geo, matrix, bones) {
+    const posAttr = geo.getAttribute('position');
+    const uvAttr = geo.getAttribute('uv');
+    const index = geo.getIndex();
+    const base = this.pos.length / 3;
+    const p = new THREE.Vector3();
+    for (let i = 0; i < posAttr.count; i++) {
+      p.fromBufferAttribute(posAttr, i).applyMatrix4(matrix);
+      this.vertex(p, uvAttr ? uvAttr.getX(i) : 0.5, uvAttr ? uvAttr.getY(i) : 0.5, bones);
+    }
+    if (index) {
+      for (let i = 0; i < index.count; i++) this.idx.push(base + index.getX(i));
+    } else {
+      for (let i = 0; i < posAttr.count; i++) this.idx.push(base + i);
+    }
+    return base;
+  }
+
+  /** A quad strip through an ordered list of rings (arrays of vertex ids). */
+  bridge(rows, closed = false) {
+    for (let i = 0; i < rows.length - 1; i++) {
+      const A = rows[i], B = rows[i + 1];
+      const n = closed ? A.length : A.length - 1;
+      for (let k = 0; k < n; k++) {
+        const k2 = (k + 1) % A.length;
+        this.idx.push(A[k], B[k], B[k2]);
+        this.idx.push(A[k], B[k2], A[k2]);
+      }
+    }
+  }
+
   _fan(st, row, radial, sign) {
     const c = new THREE.Vector3(0, sign * Math.min(st.rx, st.rz) * 0.55, 0)
       .applyQuaternion(st.q).add(st.p);

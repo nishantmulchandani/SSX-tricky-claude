@@ -15,6 +15,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { heightAt } from './terrain.js';
+import { mulberry32 } from '../core/noise.js';
 
 // --------------------------------------------------------------------------
 // attribute convention
@@ -116,6 +117,31 @@ export function tubeAlong(points, radius, radial = 6, closedCaps = false) {
   const curve = new THREE.CatmullRomCurve3(points, false, 'catmullrom', 0.0);
   const segs = Math.max(2, (points.length - 1) * 3);
   return new THREE.TubeGeometry(curve, segs, radius, radial, false);
+}
+
+// A box aligned along a -> b with a controlled world-up, which `span` cannot do:
+// span builds its rotation with setFromUnitVectors, so the roll about the axis
+// is whatever that happens to produce. A slider box has to stay level.
+const _u = new THREE.Vector3(0, 1, 0);
+const _d = new THREE.Vector3();
+const _r = new THREE.Vector3();
+const _up2 = new THREE.Vector3();
+const _mid = new THREE.Vector3();
+const _bas = new THREE.Matrix4();
+export function slab(a, b, width, thick) {
+  _d.copy(b).sub(a);
+  const len = _d.length() || 1e-6;
+  _d.divideScalar(len);
+  _r.crossVectors(_u, _d);
+  if (_r.lengthSq() < 1e-8) _r.set(1, 0, 0);
+  _r.normalize();
+  _up2.crossVectors(_d, _r).normalize();
+  const g = box(1, 1, 1);
+  _bas.makeBasis(_r.clone().multiplyScalar(width), _up2.clone().multiplyScalar(thick), _d.clone().multiplyScalar(len));
+  _mid.addVectors(a, b).multiplyScalar(0.5);
+  _bas.setPosition(_mid);
+  g.applyMatrix4(_bas);
+  return g;
 }
 
 /** A stretched-box beam from a to b with a given cross-section. */
@@ -240,6 +266,117 @@ export class Dressing {
     }
     for (const [i, b] of this.buckets) {
       if (i < lo - 1 || i > hi + 1) for (const m of b.meshes) m.visible = false;
+    }
+  }
+}
+
+// --------------------------------------------------------------------------
+// ScatterField: streamed, chunked, deterministic point scattering
+// --------------------------------------------------------------------------
+/**
+ * Trees and rocks are far too numerous to hold all 6.4 km of them in memory,
+ * and far too expensive to evaluate in one go — a single tree candidate costs
+ * several `heightAt` calls, and `heightAt` is five octaves of noise.
+ *
+ * So the world is diced into square chunks, each chunk is a jittered grid of
+ * candidate cells, and each chunk is generated at most once, lazily, on a
+ * per-frame budget, from its own `mulberry32` stream keyed on its integer
+ * coordinates. Nothing depends on visit order, so the forest is identical on
+ * every boot and identical whichever direction you approach it from.
+ *
+ * `emit(x, z, rng, out)` pushes `stride` floats onto `out` to accept a point,
+ * or pushes nothing to reject it. It must consume the rng stream in a fixed
+ * pattern per candidate.
+ */
+export class ScatterField {
+  constructor({ chunk = 128, cell = 8, seed = 1, stride, emit }) {
+    this.chunk = chunk;
+    this.cell = cell;
+    this.n = Math.max(1, Math.round(chunk / cell));
+    this.seed = seed >>> 0;
+    this.stride = stride;
+    this.emit = emit;
+    this.chunks = new Map();      // "ix,iz" -> Float32Array
+    this.built = 0;
+  }
+
+  _build(ix, iz) {
+    const { chunk, cell, n } = this;
+    const out = [];
+    const x0 = ix * chunk, z0 = iz * chunk;
+    // Hash the chunk coordinates into a seed. The multiplies are the usual
+    // 32-bit mixing constants; the xor keeps neighbouring chunks decorrelated.
+    const s = (this.seed ^ Math.imul(ix, 0x9e3779b1) ^ Math.imul(iz, 0x85ebca6b)) >>> 0;
+    const rng = mulberry32(s);
+    for (let jz = 0; jz < n; jz++) {
+      for (let jx = 0; jx < n; jx++) {
+        const x = x0 + (jx + 0.12 + rng() * 0.76) * cell;
+        const z = z0 + (jz + 0.12 + rng() * 0.76) * cell;
+        this.emit(x, z, rng, out);
+      }
+    }
+    this.built++;
+    return new Float32Array(out);
+  }
+
+  /**
+   * Make sure every chunk within `radius` of (cx, cz) exists, newest-first by
+   * distance, spending at most `budget` builds. Chunks well outside the radius
+   * are dropped so a long run does not grow without bound.
+   */
+  stream(cx, cz, radius, budget = 2) {
+    const { chunk } = this;
+    const i0 = Math.floor((cx - radius) / chunk), i1 = Math.floor((cx + radius) / chunk);
+    const j0 = Math.floor((cz - radius) / chunk), j1 = Math.floor((cz + radius) / chunk);
+    let best = null, bestD = Infinity;
+    for (let iz = j0; iz <= j1; iz++) {
+      for (let ix = i0; ix <= i1; ix++) {
+        const k = ix + ',' + iz;
+        if (this.chunks.has(k)) continue;
+        const mx = (ix + 0.5) * chunk - cx, mz = (iz + 0.5) * chunk - cz;
+        const d = mx * mx + mz * mz;
+        if (d < bestD) { bestD = d; best = [ix, iz, k]; }
+      }
+    }
+    let spent = 0;
+    while (best && spent < budget) {
+      this.chunks.set(best[2], this._build(best[0], best[1]));
+      spent++;
+      if (spent >= budget) break;
+      best = null; bestD = Infinity;
+      for (let iz = j0; iz <= j1; iz++) {
+        for (let ix = i0; ix <= i1; ix++) {
+          const k = ix + ',' + iz;
+          if (this.chunks.has(k)) continue;
+          const mx = (ix + 0.5) * chunk - cx, mz = (iz + 0.5) * chunk - cz;
+          const d = mx * mx + mz * mz;
+          if (d < bestD) { bestD = d; best = [ix, iz, k]; }
+        }
+      }
+    }
+
+    // eviction
+    if (this.chunks.size > 40) {
+      const evict = radius * 1.45 + chunk;
+      for (const [k] of this.chunks) {
+        const c = k.indexOf(',');
+        const ix = +k.slice(0, c), iz = +k.slice(c + 1);
+        const mx = (ix + 0.5) * chunk - cx, mz = (iz + 0.5) * chunk - cz;
+        if (mx * mx + mz * mz > evict * evict) this.chunks.delete(k);
+      }
+    }
+  }
+
+  /** Visit every built chunk whose square overlaps the radius. */
+  forEachChunk(cx, cz, radius, fn) {
+    const { chunk } = this;
+    const i0 = Math.floor((cx - radius) / chunk), i1 = Math.floor((cx + radius) / chunk);
+    const j0 = Math.floor((cz - radius) / chunk), j1 = Math.floor((cz + radius) / chunk);
+    for (let iz = j0; iz <= j1; iz++) {
+      for (let ix = i0; ix <= i1; ix++) {
+        const data = this.chunks.get(ix + ',' + iz);
+        if (data && data.length) fn(data, ix, iz);
+      }
     }
   }
 }
