@@ -11,6 +11,7 @@
  */
 import { BoardPhysics } from '../src/physics/board.js';
 import { TrickSystem } from '../src/tricks/trickSystem.js';
+import { GRAB_BUTTONS, resolveGrab, composeTrickName } from '../src/tricks/trickTable.js';
 import { heightAt, courseXAt, courseWidthAt, courseFeatures } from '../src/world/terrain.js';
 
 const JUMPS = courseFeatures()
@@ -21,6 +22,21 @@ const JUMPS = courseFeatures()
 function toNextLip(z) {
   for (const f of JUMPS) if (f.z < z - 2) return z - f.z;
   return Infinity;
+}
+
+/**
+ * Seconds until the rider reaches the snow, while descending.
+ *
+ * Altitude alone is the wrong measure for "spot the landing": 4m above the
+ * ground at 30 m/s of descent is a tenth of a second, nowhere near enough to
+ * settle a rotation, while the same 4m at walking pace is ages. Every scripted
+ * rider that used a fixed altitude bailed on landing regardless of how well
+ * the jump was set up.
+ */
+function timeToLand(body) {
+  const alt = body.pos.y - heightAt(body.pos.x, body.pos.z);
+  const fall = Math.max(0.5, -body.vel.y);
+  return body.vel.y < 0 ? alt / fall : Infinity;
 }
 
 /**
@@ -257,7 +273,78 @@ console.log('=== TRICK SYSTEM TEST ===\n');
   check('nothing is left pending after banking', (tricks.scorer?.pending ?? 0) === 0);
 }
 
-// 6. Reset must fully clear state.
+// 6. Variety. The table is large, but a table nobody can reach is not variety.
+//
+//    Split deliberately: the naming layer is exercised directly across every
+//    input combination, and the integration case only has to prove that a grab
+//    survives into a live trick name. Trying to make one scripted rider land
+//    eight different tricks measures how well the script rides, not how much
+//    variety the game has.
+{
+  const names = new Set();
+  const dirs = ['neutral', 'left', 'right', 'up', 'down'];
+  for (const btn of GRAB_BUTTONS) {
+    for (const d of dirs) {
+      const g = resolveGrab([btn], d);
+      if (g?.name) names.add(g.name);
+    }
+  }
+  // Two-button combinations unlock their own grabs.
+  for (let i = 0; i < GRAB_BUTTONS.length; i++) {
+    for (let j = i + 1; j < GRAB_BUTTONS.length; j++) {
+      for (const d of dirs) {
+        const g = resolveGrab([GRAB_BUTTONS[i], GRAB_BUTTONS[j]], d);
+        if (g?.name) names.add(g.name);
+      }
+    }
+  }
+  console.log('\n  [diag] reachable grabs: ' + names.size);
+  console.log('  [diag] ' + [...names].slice(0, 12).join(' | '));
+  check('every grab button + direction reaches a distinct grab', names.size >= 16,
+    `${names.size} distinct grabs`);
+
+  // Rotation naming across the range a player can actually produce.
+  const rotNames = new Set();
+  for (const yaw of [0.5, 1, 1.5, 2, 2.5, 3]) {
+    for (const flip of [0, 1]) {
+      for (const stance of [0, 1]) {
+        const c = composeTrickName({ yaw, flip, roll: 0 }, [], stance, false);
+        if (c?.name) rotNames.add(c.name);
+      }
+    }
+  }
+  console.log('  [diag] reachable rotations: ' + rotNames.size);
+  check('rotations name out across spins, flips and stance', rotNames.size >= 10,
+    `${rotNames.size} distinct rotation names`);
+
+  // And the two compose.
+  const combo = composeTrickName({ yaw: 1.5, flip: 0, roll: 0 }, [resolveGrab(['grab1'], 'left')], 0, false);
+  check('a rotation and a grab compose into one name',
+    /\d{3}/.test(combo.name) && combo.name.split(' ').length >= 3, combo.name);
+}
+
+// 6b. Integration: a grab held through a real air must reach the live name.
+{
+  let sawGrabName = false;
+  for (const startZ of [-3930, -960, -440]) {
+    const { log } = run({
+      startZ, seconds: 22,
+      script: (t, { body, input }) => {
+        const spotting = timeToLand(body) < 0.45;
+        if (!body.grounded) input.set('grab1', !spotting && body.airTime > 0.18);
+      },
+    });
+    if (log.names.some((n) => /indy|melon|method|mute|stale|nose|tail|crail|japan|roast|seatbelt|beef|nuclear|truck|tindy|chicken|bacon/i.test(n))) {
+      sawGrabName = true;
+      console.log('  [diag] grab names in a live run: '
+        + log.names.filter((n) => /[a-z]{4}/i.test(n.replace(/side|switch|cab|misty|under|flip/gi, ''))).slice(0, 4).join(' | '));
+      break;
+    }
+  }
+  check('a grab held through a real air reaches the live trick name', sawGrabName);
+}
+
+// 7. Reset must fully clear state.
 {
   const { tricks } = run({ startZ: -960, seconds: 20, script: (t, { body, input }) => {
     const spotting = body.vel.y < 0 && altitude(body) < 6;

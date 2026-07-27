@@ -252,7 +252,10 @@ export function composeTrickName(rev, grabs, stance = 0, toSwitch = false) {
   else name = 'Straight Air';
 
   if (toSwitch) name += ' to Switch';
-  return { name, ...rot, grabNames };
+  // `rot` carries its own `name` (the rotation half). It must be spread FIRST,
+  // or it overwrites the composed name and every grab silently disappears from
+  // the trick readout — the whole grab table becomes unreachable in play.
+  return { ...rot, name, grabNames };
 }
 
 // ── Landing grades ─────────────────────────────────────────────────────────
