@@ -26,8 +26,8 @@ export class ChaseCamera {
   /** Teleport the rig — used after a respawn so the camera does not fly across the map. */
   snap(body) {
     const fwd = body.forward;
-    this.pos.copy(body.pos).addScaledVector(fwd, -8).add(new THREE.Vector3(0, 3.2, 0));
-    this.look.copy(body.pos).addScaledVector(fwd, 10);
+    this.pos.copy(body.pos).addScaledVector(fwd, -5).add(new THREE.Vector3(0, 2.0, 0));
+    this.look.copy(body.pos).addScaledVector(fwd, 6).add(new THREE.Vector3(0, 1.75, 0));
     this.vel.set(0, 0, 0);
     this.lookVel.set(0, 0, 0);
     this.camera.position.copy(this.pos);
@@ -36,8 +36,13 @@ export class ChaseCamera {
 
   update(dt, body) {
     const speed01 = THREE.MathUtils.clamp(body.speed / 62, 0, 1);
-    const back = THREE.MathUtils.lerp(7.4, 10.6, speed01);
-    const height = THREE.MathUtils.lerp(2.9, 4.0, speed01) + (body.grounded ? 0 : Math.min(3.5, body.airTime * 2.4));
+    // Close and low, deliberately. The rider should read as a character you
+    // are driving — board graphic legible, arms and lean visible, filling a
+    // good third of the frame — not a distant speck on a hillside. Sitting
+    // this far back was the single biggest thing making the POV feel weak.
+    const back = THREE.MathUtils.lerp(3.7, 5.2, speed01);
+    const height = THREE.MathUtils.lerp(1.7, 2.15, speed01)
+      + (body.grounded ? 0 : Math.min(2.0, body.airTime * 1.5));
 
     const fwd = body.forward;
     this._desired.copy(body.pos)
@@ -45,20 +50,24 @@ export class ChaseCamera {
       .add(new THREE.Vector3(0, height, 0));
 
     // Keep the camera above the terrain behind the rider.
-    const floor = heightAt(this._desired.x, this._desired.z) + 1.6;
+    const floor = heightAt(this._desired.x, this._desired.z) + 1.15;
     if (this._desired.y < floor) this._desired.y = floor;
 
     // Critically-damped spring — stiffer on the ground, floatier in the air.
     const stiff = body.grounded ? 46 : 26;
     spring(this.pos, this.vel, this._desired, stiff, dt);
 
+    // Aim just over the rider's shoulder rather than far down the hill, which
+    // is what keeps them low-centre in frame instead of shrinking to a dot.
     this._target.copy(body.pos)
-      .addScaledVector(fwd, 9 + speed01 * 7)
-      .add(new THREE.Vector3(0, 1.6, 0));
+      .addScaledVector(fwd, 3.4 + speed01 * 3.2)
+      .add(new THREE.Vector3(0, 1.75, 0));
     spring(this.look, this.lookVel, this._target, 30, dt);
 
-    // Speed FOV — the single biggest contributor to a sense of velocity.
-    const targetFov = 58 + speed01 * 22 + (body.grounded ? 0 : -3);
+    // Speed FOV. A wide lens sells velocity but shrinks the rider, and at 80deg
+    // the character became a dot — the whole point of pulling the camera in.
+    // Kept narrower, with the rush effect carried by the post stack instead.
+    const targetFov = 56 + speed01 * 15 + (body.grounded ? 0 : -2);
     this.fov += (targetFov - this.fov) * (1 - Math.exp(-4 * dt));
 
     // Bank into carves.

@@ -24,7 +24,11 @@ export class Engine {
     });
     this.renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
-    this.renderer.toneMapping = THREE.AgXToneMapping;
+    // ACES, not AgX. AgX is deliberately desaturating and filmic — excellent
+    // for photoreal work, and exactly wrong here: it turned brilliant snow
+    // grey-beige and the sky into pale haze. This game wants saturated,
+    // high-key arcade colour.
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.0;
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.VSMShadowMap;

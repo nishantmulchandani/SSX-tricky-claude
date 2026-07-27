@@ -52,13 +52,16 @@ const DEG = Math.PI / 180;
 const DEFAULTS = {
   // Late morning, high alpine. 23 degrees is low enough for long shadows and
   // real modelling on the snow, high enough that the sun is not orange.
-  sunElevation: 23.0,
+  // Raised from 23deg. A low sun gives a dark, moody zenith; the reference look
+  // is a bright high-alpine midday with a vivid blue sky. Still low enough to
+  // rake real shadows across the piste.
+  sunElevation: 38.0,
   // Measured from the fall line (-Z) towards +X: the sun sits ahead and to the
   // right, so the run is cross-lit and back-lit and the shadows rake across it.
   sunAzimuth: 36.0,
 
   /** Top-of-atmosphere solar irradiance expressed in render units. */
-  exposure: 4.6,
+  exposure: 5.1,
   /** Aerosol load. 1 = molecular only (unphysically clean), 3-4 = hazy valley.
    *  High alpine air really is close to pristine, and the deep blue that comes
    *  with it is most of what says "3000 m" before any geometry does. */

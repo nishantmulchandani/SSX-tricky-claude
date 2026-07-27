@@ -120,9 +120,17 @@ export function createPostStack(engine, { sky } = {}) {
   const grade = new ShaderPass(GradeShader);
   const gu = grade.material.uniforms;
   gu.uResolution.value = new THREE.Vector2(width, height);
-  gu.uShadowTint.value = new THREE.Vector3(0.90, 0.955, 1.075);
-  gu.uHighlightTint.value = new THREE.Vector3(1.055, 1.005, 0.945);
-  gu.uLift.value = new THREE.Vector3(0.014, 0.020, 0.034);
+  // Punchy rather than filmic. Shadows go cool-blue (sky-lit snow really is
+  // blue in shadow), highlights stay clean white rather than warming off into
+  // cream, and the lift is nearly zero — lifting blacks is what was making
+  // every frame look hazy and washed out.
+  gu.uShadowTint.value = new THREE.Vector3(0.86, 0.94, 1.12);
+  gu.uHighlightTint.value = new THREE.Vector3(1.02, 1.01, 0.99);
+  gu.uLift.value = new THREE.Vector3(0.002, 0.004, 0.010);
+  gu.uSaturation.value = 1.24;
+  gu.uContrast.value = 1.14;
+  gu.uVignette.value = 0.30;
+  gu.uAberration.value = 0.0012;
   grade.renderToScreen = true;
   composer.addPass(grade);
 
