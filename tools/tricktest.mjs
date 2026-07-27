@@ -48,7 +48,7 @@ function check(name, cond, detail = '') {
  * Drive the rider off a known kicker.
  * @param script called every step with (t, ctx) to set inputs
  */
-function run({ startZ = -440, seconds = 12, script = () => {} }) {
+function run({ startZ = -440, seconds = 12, script = () => {}, stopWhen = null }) {
   const body = new BoardPhysics();
   const tricks = new TrickSystem();
   const input = new FakeInput();
@@ -89,6 +89,7 @@ function run({ startZ = -440, seconds = 12, script = () => {} }) {
       if (!log.events.includes(k)) log.events.push(k);
     }
     t += DT;
+    if (stopWhen && stopWhen(tricks, body)) break;
   }
   return { body, tricks, log };
 }
@@ -152,7 +153,33 @@ console.log('=== TRICK SYSTEM TEST ===\n');
   console.log('  [diag] scorer:', JSON.stringify({ score: tricks.scorer?.score, banked: tricks.scorer?.bankedCount, mult: tricks.scorer?.multiplier, boost: tricks.scorer?.boost }));
 }
 
-// 5. Reset must fully clear state.
+// 5. Finishing a run must bank the chain still in progress.
+{
+  // Stop the run the instant a landed trick is sitting in the chain, which is
+  // exactly the state a player is in when they cross the finish line.
+  const { tricks } = run({
+    startZ: -960, seconds: 40,
+    stopWhen: (tr) => (tr.scorer?.pending ?? 0) > 0,
+    script: (t, { body, input }) => {
+      const spotting = body.vel.y < 0 && altitude(body) < 6;
+      input.set('prewind', body.grounded);
+      input.set('spinR', !body.grounded && !spotting);
+      input.set('grab2', !body.grounded && body.airTime > 0.25 && !spotting);
+    },
+  });
+  const pendingBefore = tricks.scorer?.pending ?? 0;
+  check('a chain is actually pending when the run is cut short', pendingBefore > 0,
+    `pending=${Math.round(pendingBefore)}`);
+  const scoreBefore = tricks.score;
+  const banked = tricks.bankAll();
+  check('bankAll() cashes an in-progress chain', banked > 0,
+    `pending=${Math.round(pendingBefore)} banked=${Math.round(banked)}`);
+  check('score never decreases when a run is banked', tricks.score >= scoreBefore,
+    `${Math.round(scoreBefore)} -> ${Math.round(tricks.score)}`);
+  check('nothing is left pending after banking', (tricks.scorer?.pending ?? 0) === 0);
+}
+
+// 6. Reset must fully clear state.
 {
   const { tricks } = run({ startZ: -960, seconds: 20, script: (t, { body, input }) => {
     const spotting = body.vel.y < 0 && altitude(body) < 6;

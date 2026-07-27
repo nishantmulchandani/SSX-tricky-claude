@@ -153,6 +153,23 @@ export class TrickSystem {
     this._landLock = 0;
   }
 
+  /**
+   * Cash any in-progress chain into the score.
+   *
+   * A combo only banks when the chain ends on the ground, so a run that
+   * finishes mid-combo would otherwise discard everything still pending —
+   * the results screen showed a final score of 0 next to a 1,361-point best
+   * trick. Crossing the line has to pay the player out.
+   *
+   * @returns points banked
+   */
+  bankAll() {
+    const banked = this.scorer.bank(this.time);
+    if (banked > 0) this._pushEvent('combo', { points: banked, count: this.scorer.bankedCount });
+    this._syncPublic();
+    return banked;
+  }
+
   // ─────────────────────────────────────────────────────────────────────────
   fixedUpdate(dt, input, body) {
     this.time += dt;

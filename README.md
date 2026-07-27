@@ -71,12 +71,16 @@ export CHROME_PATH=/opt/pw-browsers/chromium-1194/chrome-linux/chrome
 node tools/lintshaders.mjs        # static shader hazards
 node tools/ridetest.mjs           # is the whole course rideable?
 node tools/tricktest.mjs          # do tricks detect, name, judge and score?
+node tools/audiotest.mjs          # render the audio graph offline, check the PCM
 node tools/smoke.mjs --seconds 6  # does the real page actually run?
 ```
 
 `ridetest` and `tricktest` run the real physics in plain Node with no browser.
-`smoke` boots the page and is the only one that catches a module which parses
-but blanks the screen at runtime.
+`audiotest` renders the whole audio graph through an OfflineAudioContext and
+checks the samples numerically — level, headroom, clipping, stereo width and
+whether the mix actually responds to the ride. `smoke` boots the page and is
+the only one that catches a module which parses but blanks the screen at
+runtime.
 
 ### Capturing frames
 

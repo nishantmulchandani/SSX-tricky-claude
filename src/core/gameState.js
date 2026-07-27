@@ -105,6 +105,9 @@ export class GameState {
   _finish(tricks) {
     this.state = RunState.FINISHED;
     this.finalTime = this.time;
+    // Pay out any chain still in progress before freezing the score, or a run
+    // that ends mid-combo silently throws those points away.
+    tricks?.bankAll?.();
     this.finalScore = tricks?.score ?? 0;
     if (!this.best || this.finalScore > this.best.score) {
       this.best = { score: this.finalScore, time: this.finalTime };
