@@ -50,6 +50,8 @@ const GRADE_WORD = {
   perfect: 'PERFECT', clean: 'CLEAN', sloppy: 'SKETCHY', crash: 'BAIL', grind: 'GRIND',
 };
 
+import { Coach } from './coach.js';
+
 const ORDINALS = { 1: 'st', 2: 'nd', 3: 'rd' };
 
 export class HUD {
@@ -108,6 +110,17 @@ export class HUD {
     el('div', 'prog__chev', this.elProgMark);
     this.elDist = el('div', 'prog__dist', this.elProgMark, '0 m');
     el('div', 'lbl prog__cap prog__cap--bot', prog, 'BASE');
+
+    // ── trick coach, centre ──────────────────────────────────────────────
+    // Sits below the trick banner so the two never collide.
+    const coach = el('div', 'coach', hud);
+    this.elCoach = coach;
+    this.elCoachTitle = el('div', 'coach__title', coach);
+    this.elCoachSub = el('div', 'coach__sub', coach);
+    const cm = el('div', 'coach__meter', coach);
+    this.elCoachFill = el('div', 'coach__fill', cm);
+    this.elCoachMeter = cm;
+    this.coach = new Coach();
 
     // ── race position + standings, top right ─────────────────────────────
     const race = el('div', 'race', hud);
@@ -374,6 +387,7 @@ export class HUD {
     this._clock();
     this._live(tricks);
     this._race(race);
+    this._coach(dt, body, tricks);
 
     if (this._banner > 0 && (this._banner -= dt) <= 0) this.elBanner.classList.remove('is-on');
     if (this._ghost > 0 && (this._ghost -= dt) <= 0) this.elGhost.classList.remove('is-on');
@@ -550,6 +564,44 @@ export class HUD {
       this.elBoost.classList.toggle('is-full', full);
       this.hud.classList.toggle('is-tricky', full);
       if (full) this._say('UBER READY');
+    }
+  }
+
+  // ── trick coach ──────────────────────────────────────────────────────────
+  /** One instruction at a time, written only when it changes. */
+  _coach(dt, body, tricks) {
+    const cue = this.coach.update(dt, body, tricks);
+    const c = this._c;
+
+    if (cue.title !== c.coachTitle) {
+      c.coachTitle = cue.title;
+      this.elCoachTitle.textContent = cue.title;
+      if (cue.title) replay(this.elCoachTitle);
+    }
+    if (cue.sub !== c.coachSub) {
+      c.coachSub = cue.sub;
+      this.elCoachSub.textContent = cue.sub;
+    }
+    if (cue.stage !== c.coachStage) {
+      c.coachStage = cue.stage;
+      this.elCoach.dataset.stage = cue.stage;
+    }
+    const urgent = cue.urgent ? '1' : '0';
+    if (urgent !== c.coachUrgent) {
+      c.coachUrgent = urgent;
+      this.elCoach.dataset.urgent = urgent;
+    }
+    const show = cue.meter >= 0 ? '1' : '0';
+    if (show !== c.coachMeterOn) {
+      c.coachMeterOn = show;
+      this.elCoachMeter.style.display = cue.meter >= 0 ? '' : 'none';
+    }
+    if (cue.meter >= 0) {
+      const q = Math.round(cue.meter * 60) / 60;
+      if (q !== c.coachMeter) {
+        c.coachMeter = q;
+        this.elCoachFill.style.transform = 'scaleX(' + q.toFixed(3) + ')';
+      }
     }
   }
 
