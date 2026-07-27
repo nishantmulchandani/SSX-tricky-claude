@@ -50,6 +50,8 @@ const GRADE_WORD = {
   perfect: 'PERFECT', clean: 'CLEAN', sloppy: 'SKETCHY', crash: 'BAIL', grind: 'GRIND',
 };
 
+const ORDINALS = { 1: 'st', 2: 'nd', 3: 'rd' };
+
 export class HUD {
   constructor(root) {
     this.root = root || document.body;
@@ -106,6 +108,15 @@ export class HUD {
     el('div', 'prog__chev', this.elProgMark);
     this.elDist = el('div', 'prog__dist', this.elProgMark, '0 m');
     el('div', 'lbl prog__cap prog__cap--bot', prog, 'BASE');
+
+    // ── race position + standings, top right ─────────────────────────────
+    const race = el('div', 'race', hud);
+    const pos = el('div', 'race__pos', race);
+    this.elPlace = el('span', 'race__place', pos, '1');
+    this.elPlaceOrd = el('span', 'race__ord', pos, 'st');
+    el('span', 'race__of', pos, '/6');
+    this.elStand = el('div', 'race__list', race);
+    this._standRows = [];
 
     // ── speedometer, bottom left ──────────────────────────────────────────
     const sp = el('div', 'speedo', hud);
@@ -342,7 +353,7 @@ export class HUD {
   }
 
   // ═══════════════════════════════════════════════════════════════════ update
-  update(dt, body, tricks, run) {
+  update(dt, body, tricks, run, race) {
     dt = Number.isFinite(dt) ? Math.min(dt, 0.1) : 0;
     const state = run?.state ?? 'riding';
     this._setScreen(state, tricks, run);
@@ -362,6 +373,7 @@ export class HUD {
     this._crash(body);
     this._clock();
     this._live(tricks);
+    this._race(race);
 
     if (this._banner > 0 && (this._banner -= dt) <= 0) this.elBanner.classList.remove('is-on');
     if (this._ghost > 0 && (this._ghost -= dt) <= 0) this.elGhost.classList.remove('is-on');
@@ -538,6 +550,53 @@ export class HUD {
       this.elBoost.classList.toggle('is-full', full);
       this.hud.classList.toggle('is-tricky', full);
       if (full) this._say('UBER READY');
+    }
+  }
+
+  // ── race standings ───────────────────────────────────────────────────────
+  /**
+   * Only writes to the DOM when something actually changed. update() runs every
+   * rendered frame, and rebuilding six rows of text each time is exactly the
+   * kind of thing that quietly costs a few ms a frame.
+   */
+  _race(race) {
+    if (!race || !race.standings) { this.elStand.parentElement.style.display = 'none'; return; }
+    const c = this._c;
+    const place = race.playerPlace | 0;
+    const n = race.fieldSize | 0;
+
+    if (place !== c.place || n !== c.fieldSize) {
+      c.place = place; c.fieldSize = n;
+      this.elPlace.textContent = String(place);
+      this.elPlaceOrd.textContent = ORDINALS[place] || 'th';
+      this.elPlace.parentElement.dataset.lead = place === 1 ? '1' : '0';
+      replay(this.elPlace);
+    }
+
+    // Build the rows once, then only patch the text that moved.
+    const list = race.standings;
+    while (this._standRows.length < list.length) {
+      const row = el('div', 'race__row', this.elStand);
+      const nm = el('span', 'race__nm', row);
+      const gp = el('span', 'race__gap', row);
+      this._standRows.push({ row, nm, gp, _nm: '', _gp: '' });
+    }
+    const leadZ = list[0] ? list[0].body.pos.z : 0;
+    for (let i = 0; i < this._standRows.length; i++) {
+      const r = this._standRows[i];
+      const e = list[i];
+      if (!e) { if (r.row.style.display !== 'none') r.row.style.display = 'none'; continue; }
+      if (r.row.style.display === 'none') r.row.style.display = '';
+
+      const nm = (i + 1) + '  ' + e.name;
+      if (nm !== r._nm) { r.nm.textContent = nm; r._nm = nm; }
+
+      // Gap shown in metres down the hill, which is what the player can act on.
+      const gap = e.finished ? e.finishTime.toFixed(1) + 's'
+        : i === 0 ? '' : '-' + Math.max(0, Math.round(e.body.pos.z - leadZ)) + 'm';
+      if (gap !== r._gp) { r.gp.textContent = gap; r._gp = gap; }
+      const isYou = e.isPlayer ? '1' : '0';
+      if (r.row.dataset.you !== isYou) r.row.dataset.you = isYou;
     }
   }
 

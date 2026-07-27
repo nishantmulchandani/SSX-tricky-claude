@@ -64,6 +64,17 @@ async function main() {
       // Captures must show a live run, not the title screen.
       g.run?.beginCountdown?.();
       if (g.run) { g.run.state = 'riding'; g.run.countdown = 0; }
+      // Move the WHOLE field, not just the player — otherwise the AI are left
+      // at the start gate and never appear in the frame.
+      if (g.race) {
+        g.race.racers.forEach((r, i) => {
+          const lateral = (i - (g.race.racers.length - 1) / 2) * 4.5;
+          // Downhill (more negative z) so they are in front of the camera.
+          r.reset(s.z - (i === 0 ? 0 : 14 + (i % 3) * 11), lateral);
+          r.body.pos.x = g.__courseX(r.body.pos.z) + lateral;
+          r.body.vel.set(0, 0, -(s.speed || 20));
+        });
+      }
       g.body.reset(s.z);
       g.body.vel.set(0, 0, -(s.speed || 20));
       if (s.steer !== undefined) g.__driveSteer = s.steer;

@@ -7,9 +7,7 @@ import { Mountain } from './world/mountain.js';
 import { courseXAt } from './world/terrain.js';
 import { createSky } from './world/sky.js';
 import { createProps } from './world/props.js';
-import { BoardPhysics } from './physics/board.js';
-import { Rider } from './player/rider.js';
-import { TrickSystem } from './tricks/trickSystem.js';
+import { Race } from './race/race.js';
 import { SnowVFX } from './vfx/particles.js';
 import { createPostStack } from './vfx/post.js';
 import { GameAudio } from './audio/audio.js';
@@ -28,22 +26,23 @@ const sky = createSky(engine.scene, engine.renderer);
 const mountain = new Mountain();
 engine.scene.add(mountain.group);
 
-const body = new BoardPhysics();
-const rider = new Rider();
-engine.scene.add(rider.group);
+// The field. The player is just racer 0 — same physics, same trick rules, same
+// input struct as the AI, which is what keeps a network layer a drop-in later.
+const race = new Race(engine.scene, input, { opponents: 5 });
+const body = race.player.body;      // convenience aliases for the systems that
+const tricks = race.player.tricks;  // only ever care about the local rider
 
 const props = createProps(engine.scene, { mountain, sky });
-const tricks = new TrickSystem();
 const vfx = new SnowVFX(engine.scene, { sky });
 const chase = new ChaseCamera(engine.camera);
 const audio = new GameAudio();
 const hud = new HUD(document.getElementById('ui-root'));
 const post = createPostStack(engine, { sky });
 const run = new GameState({
-  onStart: () => { body.reset(-20); tricks.reset(); chase.snap(body); },
+  onStart: () => { race.reset(); chase.snap(body); },
 });
 
-body.reset(-20);
+race.reset();
 chase.snap(body);
 mountain.update(engine.camera.position);
 
@@ -51,6 +50,8 @@ mountain.update(engine.camera.position);
 const startAudio = () => { audio.init(); removeEventListener('pointerdown', startAudio); removeEventListener('keydown', startAudio); };
 addEventListener('pointerdown', startAudio);
 addEventListener('keydown', startAudio);
+
+const world = { mountain, props };
 
 const game = {
   fixedUpdate(dt, elapsed) {
@@ -63,34 +64,21 @@ const game = {
     }
 
     const stepPhysics = run.fixedUpdate(dt, body, tricks);
+    if (stepPhysics) race.fixedUpdate(dt, world);
 
-    if (stepPhysics) {
-      // The trick system owns rotation while airborne and reports back the
-      // control intent the physics body should apply.
-      const intent = tricks.fixedUpdate(dt, input, body);
-
-      body.step(dt, {
-        steer: intent.steer,
-        pitch: intent.pitch,
-        jumpHeld: input.down('jump'),
-        jumpReleased: input.justReleased('jump'),
-        brake: input.down('brake'),
-      });
-    }
-
-    if (input.justPressed('reset')) { body.reset(body.pos.z); tricks.reset(); chase.snap(body); }
+    if (input.justPressed('reset')) { race.reset(); chase.snap(body); }
     input.endFrame();
   },
 
   update(dt, alpha, elapsed) {
     chase.update(dt, body);
     mountain.update(engine.camera.position);
-    rider.update(dt, body, tricks);
+    race.update(dt);
     props.update?.(dt, body, engine.camera);
     vfx.update(dt, body, tricks, engine.camera);
     sky.update(dt, elapsed, engine.camera);
     audio.update(dt, body, tricks);
-    hud.update(dt, body, tricks, run);
+    hud.update(dt, body, tricks, run, race);
   },
 
   render(dt) {
@@ -107,4 +95,9 @@ engine.add(game);
 engine.start();
 
 // Debug handle for tools/shot.mjs and tools/probe.mjs.
-globalThis.__game = { __courseX: courseXAt, engine, body, chase, mountain, sky, input, rider, vfx, tricks, props, hud, post, audio, run, THREE };
+globalThis.__game = {
+  __courseX: courseXAt,
+  engine, chase, mountain, sky, input, vfx, props, hud, post, audio, run, race, THREE,
+  // Local-rider aliases the capture tools already use.
+  body, tricks, rider: race.player.rider,
+};
